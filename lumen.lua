@@ -29,19 +29,19 @@ local Lumen = { Version = "2.0.0", Flags = {}, Options = {}, Windows = {}, Liste
 local rgb = Color3.fromRGB
 local C = {
 	White = Color3.new(1, 1, 1), Black = Color3.new(0, 0, 0),
-	Green = rgb(60, 230, 140), Purple = rgb(160, 110, 255), Pink = rgb(245, 70, 120),
-	Gold = rgb(255, 200, 60), Red = rgb(240, 70, 80),
+	Green = rgb(72, 182, 128), Purple = rgb(128, 108, 205), Pink = rgb(206, 88, 126),
+	Gold = rgb(214, 174, 72), Red = rgb(204, 78, 86),
 }
 
 Lumen.Accents = {
-	Blue = rgb(52, 128, 255), Violet = rgb(140, 100, 255), Emerald = rgb(40, 200, 130),
-	Crimson = rgb(240, 70, 100), Gold = rgb(240, 170, 40), Cyan = rgb(40, 200, 230),
+	Blue = rgb(66, 120, 214), Violet = rgb(124, 104, 210), Emerald = rgb(48, 168, 120),
+	Crimson = rgb(206, 78, 100), Gold = rgb(208, 160, 58), Cyan = rgb(54, 166, 196),
 }
 
 Lumen.Themes = {
 	Glass = {
 		Window1 = rgb(34, 42, 68), Window2 = rgb(14, 18, 30), WinT = 0.12, Panel = rgb(14, 18, 30),
-		Card = rgb(10, 14, 26), CardT = 0.3, Text = rgb(242, 245, 255), Sub = rgb(150, 160, 190),
+		Card = rgb(10, 14, 26), CardT = 0.3, Text = rgb(214, 220, 236), Sub = rgb(134, 143, 170),
 		Off = rgb(58, 66, 92), Line = C.White, LineT = 0.86, Accent = Lumen.Accents.Blue,
 	},
 	Midnight = {
@@ -278,7 +278,7 @@ function Lumen:CreateWindow(cfg)
 	local function text(par, t, size, font, color, pos, sz, align)
 		local l = New("TextLabel", {
 			BackgroundTransparency = 1, Position = pos or UDim2.fromOffset(12, 0), Size = sz or UDim2.new(1, -24, 1, 0),
-			Font = font or Enum.Font.GothamMedium, TextSize = size or 13, TextXAlignment = align or Enum.TextXAlignment.Left,
+			Font = font or Enum.Font.GothamMedium, TextSize = math.max((size or 13) - 1, 9), TextXAlignment = align or Enum.TextXAlignment.Left,
 			Text = t, Parent = par,
 		})
 		if typeof(color) == "Color3" then l.TextColor3 = color else bind(l, "TextColor3", color or "Text") end
@@ -301,8 +301,8 @@ function Lumen:CreateWindow(cfg)
 			})
 		end
 		return New("TextLabel", {
-			BackgroundTransparency = 1, Position = pos, Size = UDim2.fromOffset(w, h), Font = Enum.Font.GothamBold,
-			TextSize = 15, Text = tostring(ic or "-"), Parent = par,
+			BackgroundTransparency = 1, Position = pos, Size = UDim2.fromOffset(w, h), Font = Enum.Font.GothamMedium,
+			TextSize = 14, Text = tostring(ic or "-"), Parent = par,
 		})
 	end
 	local function loadAvatar(img)
@@ -344,7 +344,7 @@ function Lumen:CreateWindow(cfg)
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
 	local Main = New("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(WIDTH, HEIGHT),
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 14), Size = UDim2.fromOffset(WIDTH, HEIGHT),
 		BackgroundColor3 = C.White, BorderSizePixel = 0, ClipsDescendants = true, Visible = false, Active = true, Parent = Gui,
 	}, { Corner(18) })
 	bind(Main, "BackgroundTransparency", "WinT")
@@ -357,7 +357,9 @@ function Lumen:CreateWindow(cfg)
 	local function fit()
 		local cam = workspace.CurrentCamera
 		local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-		return math.min(userScale, (vp.X - 24) / WIDTH, (vp.Y - 24) / HEIGHT)
+		local touch = UIS.TouchEnabled
+		local mx, my = touch and 120 or 60, touch and 100 or 70
+		return math.min(userScale * (cfg.Scale or 0.8), (vp.X - mx) / WIDTH, (vp.Y - my) / HEIGHT)
 	end
 	Scale.Scale = fit() * 0.9
 	if workspace.CurrentCamera then
@@ -373,7 +375,7 @@ function Lumen:CreateWindow(cfg)
 		makeIcon(Topbar, cfg.Icon, 28, 28, UDim2.fromOffset(16, 14))
 		titleX = 52
 	end
-	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBlack, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
+	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
 	text(Topbar, string.upper(cfg.Subtitle or "Premium - Glass - Interface"), 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(titleX, 33), UDim2.new(0.6, 0, 0, 14))
 	local line = New("Frame", { Position = UDim2.new(0, 16, 1, -1), Size = UDim2.new(1, -32, 0, 1), BackgroundColor3 = C.White, BackgroundTransparency = 0.88, BorderSizePixel = 0, Parent = Topbar })
 	bind(line, "BackgroundColor3", "Line")
@@ -381,7 +383,7 @@ function Lumen:CreateWindow(cfg)
 	local function circleBtn(label, xOff)
 		local b = New("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, xOff, 0.5, 0), Size = UDim2.fromOffset(30, 30), AutoButtonColor = false,
-			BackgroundTransparency = 0.88, Font = Enum.Font.GothamBold, TextSize = 14, Text = label, Parent = Topbar,
+			BackgroundTransparency = 0.88, Font = Enum.Font.GothamMedium, TextSize = 13, Text = label, Parent = Topbar,
 		}, { Corner(15) })
 		bind(b, "BackgroundColor3", "Line")
 		bind(b, "TextColor3", "Text")
@@ -439,7 +441,7 @@ function Lumen:CreateWindow(cfg)
 		local av = New("ImageLabel", { Position = UDim2.fromOffset(10, 10), Size = UDim2.fromOffset(32, 32), BackgroundTransparency = 0.4, BorderSizePixel = 0, Parent = chip }, { Corner(16) })
 		bind(av, "BackgroundColor3", "Panel")
 		loadAvatar(av)
-		text(chip, lp.DisplayName, 12, Enum.Font.GothamBold, "Text", UDim2.fromOffset(50, 9), UDim2.new(1, -56, 0, 16)).TextTruncate = Enum.TextTruncate.AtEnd
+		text(chip, lp.DisplayName, 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(50, 9), UDim2.new(1, -56, 0, 16)).TextTruncate = Enum.TextTruncate.AtEnd
 		text(chip, "v" .. Lumen.Version, 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(50, 26), UDim2.new(1, -56, 0, 14))
 	end
 	local Pages = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(172, 0), Size = UDim2.new(1, -186, 1, -14), Parent = Body })
@@ -480,7 +482,7 @@ function Lumen:CreateWindow(cfg)
 		local timer = New("Frame", { Position = UDim2.new(0, 0, 1, -2), Size = UDim2.new(1, 0, 0, 2), BorderSizePixel = 0, BackgroundTransparency = 0.3, Parent = c })
 		if tc then bar.BackgroundColor3 = tc timer.BackgroundColor3 = tc
 		else bind(bar, "BackgroundColor3", "Accent") bind(timer, "BackgroundColor3", "Accent") end
-		text(c, n.Title or "Notice", 14, Enum.Font.GothamBold, "Text", UDim2.fromOffset(20, 8), UDim2.new(1, -30, 0, 18))
+		text(c, n.Title or "Notice", 14, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(20, 8), UDim2.new(1, -30, 0, 18))
 		if content ~= "" then
 			local b = text(c, content, 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 28), UDim2.new(1, -34, 0, bodyH))
 			b.TextWrapped = true
@@ -511,10 +513,10 @@ function Lumen:CreateWindow(cfg)
 			local s = New("UIStroke", { Thickness = 1.5, Parent = f })
 			if neon == "accent" then
 				bind(s, "Color", "Accent")
-				s.Transparency = 0.45
+				s.Transparency = 0.72
 			elseif typeof(neon) == "Color3" then
 				s.Color = neon
-				s.Transparency = 0.35
+				s.Transparency = 0.62
 			else
 				bind(s, "Color", "Line")
 				bind(s, "Transparency", "LineT")
@@ -528,12 +530,12 @@ function Lumen:CreateWindow(cfg)
 		local function named(f, name, desc, rightPad)
 			rightPad = rightPad or 24
 			if desc then
-				text(f, name, 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 8), UDim2.new(1, -rightPad - 12, 0, 18))
+				text(f, name, 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 8), UDim2.new(1, -rightPad - 12, 0, 18))
 				local d = text(f, desc, 11, Enum.Font.Gotham, "Sub", UDim2.fromOffset(12, 28), UDim2.new(1, -rightPad - 12, 0, 16))
 				d.TextTruncate = Enum.TextTruncate.AtEnd
 				return
 			end
-			text(f, name, 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 0), UDim2.new(1, -rightPad - 12, 1, 0))
+			text(f, name, 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 0), UDim2.new(1, -rightPad - 12, 1, 0))
 		end
 		local function base(f, o)
 			o.Frame = f
@@ -566,7 +568,7 @@ function Lumen:CreateWindow(cfg)
 		function host:CreateSection(title, neon)
 			local f = card(30, neon or C.Pink)
 			New("Frame", { Position = UDim2.fromOffset(10, 7), Size = UDim2.fromOffset(3, 16), BackgroundColor3 = neon or C.Pink, BorderSizePixel = 0, Parent = f }, { Corner(2) })
-			text(f, string.upper(title or "Section"), 11, Enum.Font.GothamBold, "Text", UDim2.fromOffset(22, 0), UDim2.new(1, -30, 1, 0))
+			text(f, string.upper(title or "Section"), 11, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(22, 0), UDim2.new(1, -30, 1, 0))
 			return base(f, {})
 		end
 		function host:CreateLabel(t)
@@ -580,9 +582,9 @@ function Lumen:CreateWindow(cfg)
 			f.Size = UDim2.new(1, 0, 0, 0)
 			Pad(12, 10, 12, 10).Parent = f
 			List(4).Parent = f
-			local t = New("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 16), Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Text = c.Title or "", Parent = f })
+			local t = New("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 16), Font = Enum.Font.GothamMedium, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Text = c.Title or "", Parent = f })
 			bind(t, "TextColor3", "Text")
-			local b = New("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Font = Enum.Font.Gotham, TextSize = 12, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Text = c.Content or "", Parent = f })
+			local b = New("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Font = Enum.Font.Gotham, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Text = c.Content or "", Parent = f })
 			bind(b, "TextColor3", "Sub")
 			return base(f, { Set = function(_, n) t.Text = n.Title or t.Text b.Text = n.Content or b.Text end })
 		end
@@ -594,9 +596,9 @@ function Lumen:CreateWindow(cfg)
 		end
 		function host:CreateInfoRow(icon, key, value, neon)
 			local f = card(40, neon or "accent")
-			text(f, icon or "•", 15, Enum.Font.GothamBold, "Text", UDim2.fromOffset(10, 0), UDim2.fromOffset(24, 40), Enum.TextXAlignment.Center)
-			text(f, key, 11, Enum.Font.GothamBold, "Sub", UDim2.fromOffset(40, 0), UDim2.new(0.28, 0, 1, 0))
-			local v = text(f, tostring(value), 12, Enum.Font.GothamBold, "Text", UDim2.new(0.34, 0, 0, 0), UDim2.new(0.66, -10, 1, 0))
+			text(f, icon or "•", 15, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(10, 0), UDim2.fromOffset(24, 40), Enum.TextXAlignment.Center)
+			text(f, key, 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(40, 0), UDim2.fromOffset(86, 40)).TextTruncate = Enum.TextTruncate.AtEnd
+			local v = text(f, tostring(value), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(132, 0), UDim2.new(1, -142, 1, 0))
 			v.TextTruncate = Enum.TextTruncate.AtEnd
 			return base(f, { Set = function(_, nv) v.Text = tostring(nv) end })
 		end
@@ -605,7 +607,7 @@ function Lumen:CreateWindow(cfg)
 		function host:CreateButton(c)
 			local f = card(c.Description and 54 or 40, c.Neon)
 			named(f, c.Name or "Button", c.Description, 36)
-			local ch = text(f, "›", 20, Enum.Font.GothamBold, "Sub", UDim2.new(1, -28, 0, 0), UDim2.new(0, 16, 1, 0), Enum.TextXAlignment.Center)
+			local ch = text(f, "›", 20, Enum.Font.GothamMedium, "Sub", UDim2.new(1, -28, 0, 0), UDim2.new(0, 16, 1, 0), Enum.TextXAlignment.Center)
 			local ring = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(), BackgroundTransparency = 1, Parent = f }, { Corner(100) })
 			local btn = hit(f)
 			hover(f, btn)
@@ -663,8 +665,8 @@ function Lumen:CreateWindow(cfg)
 			local max = c.Range and c.Range[2] or 100
 			local inc = c.Increment or 1
 			local f = card(56, c.Neon)
-			text(f, c.Name or "Slider", 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 6), UDim2.new(0.6, 0, 0, 20))
-			local val = text(f, "", 12, Enum.Font.GothamBold, "Sub", UDim2.new(0.4, -12, 0, 6), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
+			text(f, c.Name or "Slider", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 6), UDim2.new(0.6, 0, 0, 20))
+			local val = text(f, "", 12, Enum.Font.GothamMedium, "Sub", UDim2.new(0.4, -12, 0, 6), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
 			local track = New("Frame", { Position = UDim2.new(0, 12, 1, -20), Size = UDim2.new(1, -24, 0, 7), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(track, "BackgroundColor3", "Off")
 			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BorderSizePixel = 0, Parent = track }, { Corner(4) })
@@ -691,8 +693,8 @@ function Lumen:CreateWindow(cfg)
 		-- progress ---------------------------------------------------------------------
 		function host:CreateProgress(c)
 			local f = card(48, c.Neon)
-			text(f, c.Name or "Progress", 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 5), UDim2.new(0.6, 0, 0, 20))
-			local val = text(f, "", 12, Enum.Font.GothamBold, "Sub", UDim2.new(0.4, -12, 0, 5), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
+			text(f, c.Name or "Progress", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 5), UDim2.new(0.6, 0, 0, 20))
+			local val = text(f, "", 12, Enum.Font.GothamMedium, "Sub", UDim2.new(0.4, -12, 0, 5), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
 			local track = New("Frame", { Position = UDim2.new(0, 12, 1, -16), Size = UDim2.new(1, -24, 0, 7), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(track, "BackgroundColor3", "Off")
 			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = c.Color or C.Green, BorderSizePixel = 0, Parent = track }, { Corner(4) })
@@ -711,12 +713,12 @@ function Lumen:CreateWindow(cfg)
 			local multi = c.MultipleOptions == true
 			local options = c.Options or {}
 			local f = card(40, c.Neon)
-			text(f, c.Name or "Dropdown", 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 0), UDim2.new(0.5, 0, 0, 40))
+			text(f, c.Name or "Dropdown", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 0), UDim2.new(0.5, 0, 0, 40))
 			local cur = text(f, "", 12, Enum.Font.GothamMedium, "Sub", UDim2.new(0.5, -34, 0, 0), UDim2.new(0.5, 0, 0, 40), Enum.TextXAlignment.Right)
 			cur.TextTruncate = Enum.TextTruncate.AtEnd
-			local arrow = text(f, "▾", 14, Enum.Font.GothamBold, "Sub", UDim2.new(1, -26, 0, 0), UDim2.fromOffset(16, 40), Enum.TextXAlignment.Center)
+			local arrow = text(f, "▾", 14, Enum.Font.GothamMedium, "Sub", UDim2.new(1, -26, 0, 0), UDim2.fromOffset(16, 40), Enum.TextXAlignment.Center)
 			local search = New("TextBox", {
-				Position = UDim2.fromOffset(8, 44), Size = UDim2.new(1, -16, 0, 26), BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 12,
+				Position = UDim2.fromOffset(8, 44), Size = UDim2.new(1, -16, 0, 26), BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 11,
 				PlaceholderText = L("Search..."), Text = "", ClearTextOnFocus = false, Visible = false, BackgroundTransparency = 0.2, Parent = f,
 			}, { Corner(6), Pad(8, 0, 8, 0) })
 			bind(search, "BackgroundColor3", "Panel")
@@ -789,7 +791,7 @@ function Lumen:CreateWindow(cfg)
 				for i, op in ipairs(o.Options) do
 					local b = New("TextButton", {
 						LayoutOrder = i, Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Text = tostring(op),
-						Font = Enum.Font.GothamMedium, TextSize = 12, AutoButtonColor = false, Parent = list,
+						Font = Enum.Font.GothamMedium, TextSize = 11, AutoButtonColor = false, Parent = list,
 					}, { Corner(6) })
 					b.BackgroundColor3 = C.White
 					b.TextColor3 = T.Text
@@ -846,10 +848,10 @@ function Lumen:CreateWindow(cfg)
 		-- input ------------------------------------------------------------------------
 		function host:CreateInput(c)
 			local f = card(40, c.Neon)
-			text(f, c.Name or "Input", 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 0), UDim2.new(0.5, 0, 1, 0))
+			text(f, c.Name or "Input", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 0), UDim2.new(0.5, 0, 1, 0))
 			local box = New("TextBox", {
 				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.new(0.42, 0, 0, 26),
-				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 12, ClearTextOnFocus = false,
+				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 11, ClearTextOnFocus = false,
 				PlaceholderText = c.PlaceholderText or "Type here...", Text = c.CurrentValue or "", Parent = f,
 			}, { Corner(6), Pad(8, 0, 8, 0) })
 			bind(box, "BackgroundColor3", "Panel")
@@ -892,7 +894,7 @@ function Lumen:CreateWindow(cfg)
 			hover(f, h)
 			local b = New("TextLabel", {
 				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.fromOffset(70, 24),
-				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.GothamBold, TextSize = 11, Text = c.CurrentKeybind or "None", Parent = f,
+				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.GothamMedium, TextSize = 10, Text = c.CurrentKeybind or "None", Parent = f,
 			}, { Corner(6) })
 			bind(b, "BackgroundColor3", "Panel")
 			bind(b, "TextColor3", "Sub")
@@ -941,7 +943,7 @@ function Lumen:CreateWindow(cfg)
 			local hueHit = New("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = hue })
 			local hex = New("TextBox", {
 				Position = UDim2.fromOffset(12, 156), Size = UDim2.new(1, -24, 0, 26), BackgroundTransparency = 0.2, BorderSizePixel = 0,
-				Font = Enum.Font.GothamMedium, TextSize = 12, ClearTextOnFocus = false, Text = "", Parent = f,
+				Font = Enum.Font.GothamMedium, TextSize = 11, ClearTextOnFocus = false, Text = "", Parent = f,
 			}, { Corner(6), Pad(8, 0, 8, 0) })
 			bind(hex, "BackgroundColor3", "Panel")
 			bind(hex, "TextColor3", "Text")
@@ -990,12 +992,12 @@ function Lumen:CreateWindow(cfg)
 			c = c or {}
 			local f = card(268)
 			local banner = New("Frame", { Size = UDim2.new(1, 0, 0, 80), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = f }, { Corner(10) })
-			local bg = New("UIGradient", { Rotation = 20, Color = ColorSequence.new(C.Purple, T.Accent), Parent = banner })
-			onTheme(function() bg.Color = ColorSequence.new(C.Purple, T.Accent) end)
+			local bg = New("UIGradient", { Rotation = 20, Color = ColorSequence.new(C.Purple:Lerp(C.Black, 0.45), T.Accent:Lerp(C.Black, 0.45)), Parent = banner })
+			onTheme(function() bg.Color = ColorSequence.new(C.Purple:Lerp(C.Black, 0.45), T.Accent:Lerp(C.Black, 0.45)) end)
 			if c.Badge ~= false then
 				New("TextLabel", {
 					AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(110, 24), BackgroundColor3 = rgb(20, 20, 40),
-					BackgroundTransparency = 0.3, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = C.Gold, Text = c.Badge or "✦ PREMIUM", Parent = f,
+					BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = C.Gold, Text = c.Badge or "PREMIUM", Parent = f,
 				}, { Corner(12), New("UIStroke", { Thickness = 1.5, Color = C.Gold }) })
 			end
 			local avatar = New("ImageLabel", { Position = UDim2.fromOffset(12, 36), Size = UDim2.fromOffset(84, 84), BorderSizePixel = 0, Parent = f }, { Corner(42) })
@@ -1006,11 +1008,11 @@ function Lumen:CreateWindow(cfg)
 			local dotf = New("Frame", { Position = UDim2.fromOffset(78, 100), Size = UDim2.fromOffset(16, 16), BackgroundColor3 = C.Green, BorderSizePixel = 0, ZIndex = 3, Parent = f }, { Corner(8) })
 			local dstroke = New("UIStroke", { Thickness = 2, Parent = dotf })
 			bind(dstroke, "Color", "Card")
-			text(f, lp.DisplayName, 16, Enum.Font.GothamBlack, "Text", UDim2.fromOffset(106, 86), UDim2.new(1, -116, 0, 20)).TextTruncate = Enum.TextTruncate.AtEnd
-			text(f, "@" .. lp.Name, 11, Enum.Font.GothamBold, C.Pink, UDim2.fromOffset(106, 106), UDim2.new(1, -116, 0, 14)).TextTruncate = Enum.TextTruncate.AtEnd
+			text(f, lp.DisplayName, 16, Enum.Font.GothamBold, "Text", UDim2.fromOffset(106, 86), UDim2.new(1, -116, 0, 20)).TextTruncate = Enum.TextTruncate.AtEnd
+			text(f, "@" .. lp.Name, 11, Enum.Font.GothamMedium, C.Pink, UDim2.fromOffset(106, 106), UDim2.new(1, -116, 0, 14)).TextTruncate = Enum.TextTruncate.AtEnd
 			local idp = New("TextButton", {
 				AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 126), Size = UDim2.new(1, -24, 0, 22), BackgroundTransparency = 0.2,
-				Font = Enum.Font.GothamBold, TextSize = 11, AutoButtonColor = false, Text = "ID  " .. lp.UserId, Parent = f,
+				Font = Enum.Font.GothamMedium, TextSize = 10, AutoButtonColor = false, Text = "ID  " .. lp.UserId, Parent = f,
 			}, { Corner(11) })
 			bind(idp, "BackgroundColor3", "Panel")
 			bind(idp, "TextColor3", "Text")
@@ -1028,13 +1030,13 @@ function Lumen:CreateWindow(cfg)
 			local chipData = c.Chips or { dayName(createdAt), L("%dy %dm", y, m), L("%d days", ageDays) }
 			for i, t in ipairs(chipData) do
 				local ch = New("TextLabel", {
-					LayoutOrder = i, Size = UDim2.new(1 / #chipData, -4, 1, 0), BackgroundTransparency = 0.3, Font = Enum.Font.GothamBold, TextSize = 10, Text = t, Parent = chips,
-				}, { Corner(11), New("UIStroke", { Thickness = 1.2, Color = C.Green, Transparency = 0.4 }) })
+					LayoutOrder = i, Size = UDim2.new(1 / #chipData, -4, 1, 0), BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, Text = t, Parent = chips,
+				}, { Corner(11), New("UIStroke", { Thickness = 1, Color = C.Green, Transparency = 0.68 }) })
 				bind(ch, "BackgroundColor3", "Panel")
 				bind(ch, "TextColor3", "Text")
 			end
 
-			local stats = New("Frame", { Position = UDim2.fromOffset(12, 188), Size = UDim2.new(1, -24, 0, 56), BackgroundTransparency = 1, Parent = f }, { List(6, true) })
+			local stats = New("Frame", { Position = UDim2.fromOffset(12, 188), Size = UDim2.new(1, -24, 0, 56), BackgroundTransparency = 1, Parent = f }, { List(8, true) })
 			local defs = c.Stats or {
 				{ Label = L("FRIENDS"), Color = C.Green, Value = "…" },
 				{ Label = "PING", Color = C.Pink, Value = "…" },
@@ -1042,12 +1044,12 @@ function Lumen:CreateWindow(cfg)
 			}
 			local vls = {}
 			for i, d in ipairs(defs) do
-				local b = New("Frame", { LayoutOrder = i, Size = UDim2.new(1 / #defs, -4, 1, 0), BackgroundTransparency = 0.35, BorderSizePixel = 0, Parent = stats }, {
-					Corner(10), New("UIStroke", { Thickness = 1.6, Color = d.Color, Transparency = 0.2 }),
+				local b = New("Frame", { LayoutOrder = i, Size = UDim2.new(1 / #defs, -math.ceil(8 * (#defs - 1) / #defs), 1, 0), BackgroundTransparency = 0.35, BorderSizePixel = 0, Parent = stats }, {
+					Corner(10), New("UIStroke", { Thickness = 1.2, Color = d.Color, Transparency = 0.55 }),
 				})
 				bind(b, "BackgroundColor3", "Panel")
-				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBlack, TextSize = 20, TextColor3 = d.Color, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
-				text(b, d.Label, 9, Enum.Font.GothamBold, "Text", UDim2.fromOffset(0, 34), UDim2.new(1, 0, 0, 14), Enum.TextXAlignment.Center)
+				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold, TextSize = 15, TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = d.Color, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
+				text(b, d.Label, 9, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(0, 34), UDim2.new(1, 0, 0, 14), Enum.TextXAlignment.Center)
 			end
 			if c.Stats then
 				onTick(function()
@@ -1078,9 +1080,9 @@ function Lumen:CreateWindow(cfg)
 
 		function host:CreateClockCard()
 			local f = card(70, "accent")
-			local t = text(f, "", 22, Enum.Font.GothamBlack, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.6, 0, 0, 28))
+			local t = text(f, "", 22, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.6, 0, 0, 28))
 			local d = text(f, "", 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(12, 40), UDim2.new(1, -24, 0, 16))
-			local sess = text(f, "", 11, Enum.Font.GothamBold, C.Green, UDim2.new(0.4, 0, 0, 12), UDim2.new(0.6, -12, 0, 16), Enum.TextXAlignment.Right)
+			local sess = text(f, "", 11, Enum.Font.GothamMedium, C.Green, UDim2.new(0.4, 0, 0, 12), UDim2.new(0.6, -12, 0, 16), Enum.TextXAlignment.Right)
 			local started = os.clock()
 			onTick(function()
 				t.Text = os.date("%H:%M:%S")
@@ -1092,7 +1094,7 @@ function Lumen:CreateWindow(cfg)
 
 		function host:CreateAnniversaryCard()
 			local f = card(70, C.Green)
-			text(f, "🎂 " .. L("Account anniversary"), 12, Enum.Font.GothamBold, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.55, 0, 0, 18))
+			text(f, "🎂 " .. L("Account anniversary"), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.55, 0, 0, 18))
 			local left = 365 - (ageDays % 365)
 			text(f, L("%d days left (year %d)", left, math.floor(ageDays / 365) + 1), 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.45, 0, 0, 8), UDim2.new(0.55, -12, 0, 18), Enum.TextXAlignment.Right)
 			local bar = New("Frame", { Position = UDim2.fromOffset(12, 44), Size = UDim2.new(1, -24, 0, 8), BorderSizePixel = 0, Parent = f }, { Corner(4) })
@@ -1109,10 +1111,10 @@ function Lumen:CreateWindow(cfg)
 				Image = "rbxthumb://type=GameIcon&id=" .. game.GameId .. "&w=150&h=150", Parent = f,
 			}, { Corner(8) })
 			bind(icon, "BackgroundColor3", "Panel")
-			local name = text(f, "…", 13, Enum.Font.GothamBold, "Text", UDim2.fromOffset(72, 8), UDim2.new(1, -80, 0, 18))
+			local name = text(f, "…", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(72, 8), UDim2.new(1, -80, 0, 18))
 			name.TextTruncate = Enum.TextTruncate.AtEnd
 			local by = text(f, "", 10, Enum.Font.Gotham, "Sub", UDim2.fromOffset(72, 26), UDim2.new(1, -80, 0, 14))
-			local live = text(f, "", 11, Enum.Font.GothamBold, C.Green, UDim2.fromOffset(72, 44), UDim2.new(1, -80, 0, 16))
+			local live = text(f, "", 11, Enum.Font.GothamMedium, C.Green, UDim2.fromOffset(72, 44), UDim2.new(1, -80, 0, 16))
 			task.spawn(function()
 				local ok, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end)
 				if ok and info then
@@ -1219,15 +1221,15 @@ function Lumen:CreateWindow(cfg)
 		local bar = New("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(3, 0), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = btn }, { Corner(2) })
 		local ic = makeIcon(btn, icon or "•", 24, 40, UDim2.fromOffset(12, 0))
 		local tx = New("TextLabel", {
-			BackgroundTransparency = 1, Position = UDim2.fromOffset(42, 0), Size = UDim2.new(1, -48, 1, 0), Font = Enum.Font.GothamBold,
-			TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Text = name, Parent = btn,
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(42, 0), Size = UDim2.new(1, -48, 1, 0), Font = Enum.Font.GothamMedium,
+			TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Text = name, Parent = btn,
 		})
 
 		local page = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = Pages })
 		local Scroll = New("ScrollingFrame", {
 			Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
 			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = page,
-		}, { List(8), Pad(0, 0, 4, 8) })
+		}, { List(10), Pad(3, 3, 7, 10) })
 		Tab.Page = page
 		attachElements(Tab, Scroll)
 
@@ -1238,7 +1240,7 @@ function Lumen:CreateWindow(cfg)
 				local s = New("ScrollingFrame", {
 					Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
 					CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = page,
-				}, { List(8), Pad(0, 0, 4, 8) })
+				}, { List(10), Pad(3, 3, 7, 10) })
 				local h = {}
 				attachElements(h, s)
 				return h
@@ -1248,8 +1250,8 @@ function Lumen:CreateWindow(cfg)
 
 		local function paint(active, instant)
 			local d = instant and 0 or 0.25
-			Tween(btn, { BackgroundColor3 = active and T.Accent or T.Off, BackgroundTransparency = active and 0.05 or 0.65 }, d)
-			Tween(bar, { Size = UDim2.fromOffset(3, active and 18 or 0) }, d, Enum.EasingStyle.Back)
+			Tween(btn, { BackgroundColor3 = active and T.Accent or T.Off, BackgroundTransparency = active and 0.42 or 0.75 }, d)
+			Tween(bar, { Size = UDim2.fromOffset(3, active and 18 or 0), BackgroundTransparency = active and 0 or 1 }, d)
 			local col = active and C.White or T.Sub
 			if ic:IsA("TextLabel") then Tween(ic, { TextColor3 = col }, d) else Tween(ic, { ImageColor3 = col }, d) end
 			Tween(tx, { TextColor3 = col }, d)
@@ -1356,7 +1358,7 @@ function Lumen:CreateWindow(cfg)
 	if cfg.MobileButton ~= false and UIS.TouchEnabled then
 		local mb = New("TextButton", {
 			AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0), Size = UDim2.fromOffset(44, 44),
-			BackgroundTransparency = 0.15, Text = "◆", Font = Enum.Font.GothamBold, TextSize = 18, TextColor3 = C.White, AutoButtonColor = false, Parent = Gui,
+			BackgroundTransparency = 0.15, Text = "◆", Font = Enum.Font.GothamMedium, TextSize = 16, TextColor3 = C.White, AutoButtonColor = false, Parent = Gui,
 		}, { Corner(22) })
 		bind(mb, "BackgroundColor3", "Panel")
 		local mbs = New("UIStroke", { Thickness = 2, Parent = mb })
@@ -1406,24 +1408,24 @@ function Lumen:CreateWindow(cfg)
 		}, { Corner(16), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
 		local gs = New("UIStroke", { Thickness = 1.5, Transparency = 0.8, Parent = gate })
 		bind(gs, "Color", "Line")
-		text(gate, ks.Title or (cfg.Name or "Lumen"), 18, Enum.Font.GothamBlack, "Text", UDim2.fromOffset(20, 14), UDim2.new(1, -60, 0, 24))
+		text(gate, ks.Title or (cfg.Name or "Lumen"), 18, Enum.Font.GothamBold, "Text", UDim2.fromOffset(20, 14), UDim2.new(1, -60, 0, 24))
 		local note = text(gate, ks.Note or L("Enter key"), 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 40), UDim2.new(1, -40, 0, 30))
 		note.TextWrapped = true
 		note.TextYAlignment = Enum.TextYAlignment.Top
-		local closeB = New("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Text = "×", Font = Enum.Font.GothamBold, TextSize = 18, Parent = gate })
+		local closeB = New("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Text = "×", Font = Enum.Font.GothamMedium, TextSize = 16, Parent = gate })
 		bind(closeB, "TextColor3", "Sub")
 		local box = New("TextBox", {
 			Position = UDim2.fromOffset(20, 80), Size = UDim2.new(1, -40, 0, 34), BackgroundTransparency = 0.2, BorderSizePixel = 0,
-			Font = Enum.Font.GothamMedium, TextSize = 13, PlaceholderText = L("Enter key"), Text = "", ClearTextOnFocus = false, Parent = gate,
+			Font = Enum.Font.GothamMedium, TextSize = 12, PlaceholderText = L("Enter key"), Text = "", ClearTextOnFocus = false, Parent = gate,
 		}, { Corner(8), Pad(10, 0, 10, 0) })
 		bind(box, "BackgroundColor3", "Panel")
 		bind(box, "TextColor3", "Text")
 		bind(box, "PlaceholderColor3", "Sub")
-		local status = text(gate, "", 11, Enum.Font.GothamBold, C.Red, UDim2.fromOffset(20, 118), UDim2.new(1, -40, 0, 16))
+		local status = text(gate, "", 11, Enum.Font.GothamMedium, C.Red, UDim2.fromOffset(20, 118), UDim2.new(1, -40, 0, 16))
 		local function gbtn(label, x, w, accent)
 			local b = New("TextButton", {
 				Position = UDim2.new(0, x, 1, -52), Size = UDim2.new(w, -26, 0, 36), BackgroundTransparency = accent and 0 or 0.3,
-				Font = Enum.Font.GothamBold, TextSize = 13, Text = label, AutoButtonColor = false, TextColor3 = C.White, Parent = gate,
+				Font = Enum.Font.GothamMedium, TextSize = 12, Text = label, AutoButtonColor = false, TextColor3 = C.White, Parent = gate,
 			}, { Corner(10) })
 			if accent then bind(b, "BackgroundColor3", "Accent") else bind(b, "BackgroundColor3", "Off") end
 			return b
