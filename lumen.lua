@@ -24,7 +24,7 @@ local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalizationService = game:GetService("LocalizationService")
 
-local Lumen = { Version = "2.0.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
+local Lumen = { Version = "2.1.0", Flags = {}, Options = {}, Windows = {}, Listening = false, ActiveKeybind = nil }
 
 local rgb = Color3.fromRGB
 local C = {
@@ -313,9 +313,20 @@ function Lumen:CreateWindow(cfg)
 			if ok then img.Image = url end
 		end)
 	end
-	local function onTick(fn)
-		ticks[#ticks + 1] = fn
-		pcall(fn)
+	-- onTick registers a per-second callback. Pass a frame ref so the
+	-- callback is auto-removed once its owning frame is destroyed.
+	local function onTick(fn, frameRef)
+		local function wrapped()
+			if frameRef then
+				if not frameRef.Parent then return false end
+				if not frameRef:IsA("GuiObject") and not frameRef:IsA("LayerCollector") then return false end
+			end
+			fn()
+			return true
+		end
+		ticks[#ticks + 1] = wrapped
+		pcall(wrapped)
+		return wrapped
 	end
 
 	-- live stats (fps / ping) + 1 second ticker --------------------------------
@@ -331,7 +342,11 @@ function Lumen:CreateWindow(cfg)
 				frames, last = 0, now
 				local ok, ping = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() end)
 				if ok then Live.Ping = math.floor(ping + 0.5) end
-				for _, fn in ipairs(ticks) do pcall(fn) end
+				-- run per-second callbacks; drop ones whose owner frame was destroyed
+				for i = #ticks, 1, -1 do
+					local ok2, keep = pcall(ticks[i])
+					if (not ok2) or keep == false then table.remove(ticks, i) end
+				end
 			end
 		end)
 	end
@@ -462,7 +477,11 @@ function Lumen:CreateWindow(cfg)
 		for _, ch in ipairs(NotifHolder:GetChildren()) do
 			if ch:IsA("Frame") then live[#live + 1] = ch end
 		end
-		if #live >= 5 then live[1]:Destroy() end
+		if #live >= 5 then
+			-- dismiss the oldest first so its task.delay doesn't tween a destroyed wrap
+			pcall(function() if live[1]._dismiss then live[1]._dismiss() end end)
+			live[1]:Destroy()
+		end
 		local bodyH = 0
 		if content ~= "" then
 			local ok, size = pcall(function() return TextService:GetTextSize(content, 12, Enum.Font.Gotham, Vector2.new(256, 1000)) end)
@@ -492,9 +511,12 @@ function Lumen:CreateWindow(cfg)
 		local function dismiss()
 			if gone then return end
 			gone = true
+			-- wrap may have been destroyed externally (5+ limit); guard the tween
+			if not wrap.Parent then return end
 			Tween(c, { Position = UDim2.new(1, 320, 0, 0) }, 0.3)
-			task.delay(0.3, function() wrap:Destroy() end)
+			task.delay(0.3, function() if wrap.Parent then wrap:Destroy() end end)
 		end
+		wrap._dismiss = dismiss
 		c.MouseButton1Click:Connect(dismiss)
 		local dur = n.Duration or 4
 		Tween(c, { Position = UDim2.new() }, 0.4, Enum.EasingStyle.Back)
@@ -818,9 +840,15 @@ function Lumen:CreateWindow(cfg)
 				elseif v ~= nil then sel[v] = true end
 				commit(silent)
 			end
-			function o:Refresh(opts)
+			function o:Refresh(opts, preserveSel)
+				local prev = sel
 				o.Options = opts
 				sel = {}
+				if preserveSel ~= false then
+					for _, op in ipairs(opts) do
+						if prev[op] then sel[op] = true end
+					end
+				end
 				search.Text = ""
 				build()
 				layout()
@@ -899,25 +927,42 @@ function Lumen:CreateWindow(cfg)
 			bind(b, "BackgroundColor3", "Panel")
 			bind(b, "TextColor3", "Sub")
 			local o = { CurrentKeybind = c.CurrentKeybind, Listening = false }
-			function o:Set(k)
+			local function syncLabel()
+				b.Text = o.CurrentKeybind or "None"
+			end
+			o._sync = syncLabel
+			-- silent=true suppresses ChangedCallback. Note: Lumen:LoadConfig calls
+			-- o:Set(v) WITHOUT silent, so loading a saved toggle key now correctly
+			-- fires ChangedCallback -> W:SetToggleKey actually updates.
+			function o:Set(k, silent)
 				o.CurrentKeybind = k
-				b.Text = k or "None"
+				syncLabel()
 				if c.Flag then Lumen.Flags[c.Flag] = k end
+				if not silent then safe(c.ChangedCallback, k) end
 			end
 			function o:Get() return o.CurrentKeybind end
+			W._keybinds = W._keybinds or {}
+			W._keybinds[#W._keybinds + 1] = o
 			h.MouseButton1Click:Connect(function()
+				-- cancel any other keybind currently listening so they don't both grab the same key
+				for _, other in ipairs(W._keybinds) do
+					if other ~= o and other.Listening then
+						other.Listening = false
+						if other._sync then pcall(other._sync) end
+					end
+				end
 				o.Listening = true
 				Lumen.Listening = true
+				Lumen.ActiveKeybind = o
 				b.Text = "..."
 			end)
 			conn(UIS.InputBegan:Connect(function(i, gpe)
 				if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
 				if o.Listening then
 					o.Listening = false
-					task.defer(function() Lumen.Listening = false end)
+					task.defer(function() Lumen.Listening = false Lumen.ActiveKeybind = nil end)
 					local k = i.KeyCode ~= Enum.KeyCode.Escape and i.KeyCode.Name or nil
 					o:Set(k)
-					safe(c.ChangedCallback, k)
 				elseif not gpe and not Lumen.Listening and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
 					safe(c.Callback)
 				end
@@ -937,7 +982,8 @@ function Lumen:CreateWindow(cfg)
 			local dot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1, ZIndex = 5, Parent = sv }, { Corner(5), New("UIStroke", { Thickness = 2, Color = C.White }) })
 			local svHit = New("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = sv })
 			local seq = {}
-			for i = 0, 6 do seq[#seq + 1] = ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(math.min(i / 6, 0.999), 1, 1)) end
+			-- hue 1.0 wraps to 0 (red); the old `math.min(_, 0.999)` clamp produced a slightly-off red endpoint
+			for i = 0, 6 do seq[#seq + 1] = ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 1, 1)) end
 			local hue = New("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -12, 0, 48), Size = UDim2.fromOffset(20, 100), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = f }, { Corner(6), New("UIGradient", { Rotation = 90, Color = ColorSequence.new(seq) }) })
 			local hdot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.new(1, 4, 0, 4), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = hue }, { Corner(2) })
 			local hueHit = New("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = hue })
@@ -973,7 +1019,21 @@ function Lumen:CreateWindow(cfg)
 			end)
 			function o:Set(col, silent) h, s, v = col:ToHSV() apply(silent) end
 			function o:Get() return o.CurrentColor end
+			function o:Close()
+				if o.Open then o.Open = false Tween(f, { Size = UDim2.new(1, 0, 0, 40) }, 0.25) end
+			end
+			W._colorpickers = W._colorpickers or {}
+			W._colorpickers[#W._colorpickers + 1] = o
 			header.MouseButton1Click:Connect(function()
+				if not o.Open then
+					-- close other popups (dropdowns + color pickers) so they don't overlap
+					for _, other in ipairs(W._dropdowns or {}) do
+						if other.Frame and other.Frame.Parent then other:Close() end
+					end
+					for _, other in ipairs(W._colorpickers) do
+						if other ~= o and other.Frame and other.Frame.Parent then other:Close() end
+					end
+				end
 				o.Open = not o.Open
 				Tween(f, { Size = UDim2.new(1, 0, 0, o.Open and 192 or 40) }, 0.25)
 			end)
@@ -1056,7 +1116,7 @@ function Lumen:CreateWindow(cfg)
 					for i, d in ipairs(defs) do
 						if type(d.Value) == "function" then vls[i].Text = tostring(d.Value()) end
 					end
-				end)
+				end, f)
 			else
 				task.spawn(function()
 					local ok, count = pcall(function()
@@ -1073,7 +1133,7 @@ function Lumen:CreateWindow(cfg)
 				onTick(function()
 					vls[2].Text = Live.Ping > 0 and (Live.Ping .. "ms") or "-"
 					vls[3].Text = tostring(Live.FPS)
-				end)
+				end, f)
 			end
 			return base(f, {})
 		end
@@ -1088,7 +1148,7 @@ function Lumen:CreateWindow(cfg)
 				t.Text = os.date("%H:%M:%S")
 				d.Text = fmtDate(os.time())
 				sess.Text = "● " .. L("session %s", fmtDuration(os.clock() - started))
-			end)
+			end, f)
 			return base(f, {})
 		end
 
@@ -1126,7 +1186,7 @@ function Lumen:CreateWindow(cfg)
 			end)
 			onTick(function()
 				live.Text = "● " .. L("%d/%d players - up %s", #Players:GetPlayers(), Players.MaxPlayers, fmtDuration(time()))
-			end)
+			end, f)
 			return base(f, {})
 		end
 
@@ -1384,27 +1444,62 @@ function Lumen:CreateWindow(cfg)
 
 	----------------------------------------------------------------------
 	-- Key system (blocks CreateWindow until a valid key is entered)
+	--
+	-- KeySystem = {
+	--   Title, Note, Link,
+	--   Keys = { "abc", "def" },                         -- static whitelist
+	--   Check = function(input, hwid) ... return true end
+	--         -- or return { Valid = true, Expires = os.time()+3600 }
+	--         -- or return false, "reason"
+	--   SaveKey = true,                                  -- persist key (legacy bool)
+	--   AskRemember = true,                              -- show "remember me" checkbox
+	--   RememberDefault = true,                          -- checkbox initial state
+	--   Mask = true,                                     -- mask input like a password
+	--   AutoUppercase = true,                            -- upper-case input before check
+	--   MaxAttempts = 5,                                 -- lock after N wrong tries
+	--   Cooldown = 30,                                   -- lock duration (seconds)
+	-- }
 	----------------------------------------------------------------------
-	local function runKeyGate(ks)
+	local function runKeyGate(ksRaw)
+		local ks = (type(ksRaw) == "table") and ksRaw or {}
+		-- HWID (best-effort) - passed to Check as the second argument so authors
+		-- can implement HWID-locked keys server-side.
+		local hwid = "-"
+		pcall(function() if gethwid then hwid = gethwid() end end)
+
+		-- Unified check: returns (valid:bool, expires:number?)
 		local function check(input)
 			if type(ks.Check) == "function" then
-				local ok, r = pcall(ks.Check, input)
-				return ok and r == true
+				local ok, r = pcall(ks.Check, input, hwid)
+				if not ok then return false, nil end
+				if type(r) == "table" then return r.Valid == true, r.Expires end
+				return r == true, nil
 			end
 			for _, k in ipairs(ks.Keys or {}) do
-				if input == k then return true end
+				if input == k then return true, nil end
 			end
-			return false
+			return false, nil
 		end
+
 		local file = "Lumen/key_" .. ((cfg.Name or "ui"):gsub("[^%w_]", "_")) .. ".txt"
-		if ks.SaveKey and fsOK() then
+		local allowSave = ks.SaveKey == true or ks.AskRemember == true
+		local showRemember = ks.AskRemember == true
+		local rememberDefault = ks.RememberDefault ~= false
+
+		-- Try saved key first (silent skip if still valid)
+		if allowSave and fsOK() then
 			local ok, saved = pcall(function() if isfile(file) then return readfile(file) end end)
-			if ok and saved and check(saved) then return true end
+			if ok and saved and saved ~= "" then
+				local valid = check(saved)
+				if valid then return true end
+			end
 		end
+
 		local done = Instance.new("BindableEvent")
+		local gateH = showRemember and 270 or 230
 		local gate = New("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(340, 210),
-			BackgroundColor3 = C.White, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = Gui,
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(340, gateH),
+			BackgroundColor3 = C.White, BackgroundTransparency = 0.1, BorderSizePixel = 0, ClipsDescendants = true, Parent = Gui,
 		}, { Corner(16), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
 		local gs = New("UIStroke", { Thickness = 1.5, Transparency = 0.8, Parent = gate })
 		bind(gs, "Color", "Line")
@@ -1412,8 +1507,12 @@ function Lumen:CreateWindow(cfg)
 		local note = text(gate, ks.Note or L("Enter key"), 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 40), UDim2.new(1, -40, 0, 30))
 		note.TextWrapped = true
 		note.TextYAlignment = Enum.TextYAlignment.Top
+
 		local closeB = New("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Text = "×", Font = Enum.Font.GothamMedium, TextSize = 16, Parent = gate })
 		bind(closeB, "TextColor3", "Sub")
+
+		local mask = ks.Mask == true
+		local realText = ""
 		local box = New("TextBox", {
 			Position = UDim2.fromOffset(20, 80), Size = UDim2.new(1, -40, 0, 34), BackgroundTransparency = 0.2, BorderSizePixel = 0,
 			Font = Enum.Font.GothamMedium, TextSize = 12, PlaceholderText = L("Enter key"), Text = "", ClearTextOnFocus = false, Parent = gate,
@@ -1421,7 +1520,37 @@ function Lumen:CreateWindow(cfg)
 		bind(box, "BackgroundColor3", "Panel")
 		bind(box, "TextColor3", "Text")
 		bind(box, "PlaceholderColor3", "Sub")
-		local status = text(gate, "", 11, Enum.Font.GothamMedium, C.Red, UDim2.fromOffset(20, 118), UDim2.new(1, -40, 0, 16))
+		local boxStroke = New("UIStroke", { Thickness = 1, Transparency = 0.85, Parent = box })
+		bind(boxStroke, "Color", "Line")
+
+		local status = text(gate, "", 11, Enum.Font.GothamMedium, C.Sub, UDim2.fromOffset(20, 118), UDim2.new(1, -40, 0, 16))
+		local function setStatus(t, color, icon)
+			status.Text = (icon and (icon .. "  ") or "") .. t
+			status.TextColor3 = color
+		end
+
+		local rememberCb
+		if showRemember then
+			local cbFrame = New("Frame", { Position = UDim2.fromOffset(20, 142), Size = UDim2.new(0.5, -20, 0, 22), BackgroundTransparency = 1, Parent = gate })
+			local cbBtn = New("TextButton", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromOffset(0, 11), Size = UDim2.fromOffset(16, 16), BackgroundTransparency = 0.4, BorderSizePixel = 0, Text = "", AutoButtonColor = false, Parent = cbFrame }, { Corner(4) })
+			bind(cbBtn, "BackgroundColor3", "Panel")
+			local cbStroke = New("UIStroke", { Thickness = 1, Transparency = 0.7, Parent = cbBtn })
+			bind(cbStroke, "Color", "Line")
+			local cbMark = New("TextLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Font = Enum.Font.GothamBold, TextSize = 11, Text = "✓", TextColor3 = C.White, TextTransparency = 1, Parent = cbBtn })
+			text(cbFrame, L("Remember key"), 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(22, 0), UDim2.new(1, -22, 1, 0))
+			rememberCb = { CurrentValue = rememberDefault }
+			local function paintCb()
+				Tween(cbBtn, { BackgroundColor3 = rememberCb.CurrentValue and T.Accent or T.Panel }, 0.15)
+				Tween(cbMark, { TextTransparency = rememberCb.CurrentValue and 0 or 1 }, 0.15)
+			end
+			onTheme(paintCb)
+			cbBtn.MouseButton1Click:Connect(function()
+				rememberCb.CurrentValue = not rememberCb.CurrentValue
+				paintCb()
+			end)
+			paintCb()
+		end
+
 		local function gbtn(label, x, w, accent)
 			local b = New("TextButton", {
 				Position = UDim2.new(0, x, 1, -52), Size = UDim2.new(w, -26, 0, 36), BackgroundTransparency = accent and 0 or 0.3,
@@ -1442,36 +1571,113 @@ function Lumen:CreateWindow(cfg)
 			getB.MouseButton1Click:Connect(function()
 				if type(setclipboard) == "function" then
 					pcall(setclipboard, ks.Link)
-					status.TextColor3 = C.Green
-					status.Text = L("Copied")
+					setStatus(L("Copied"), C.Green, "✓")
 				else
-					status.TextColor3 = C.Gold
-					status.Text = ks.Link
+					setStatus(tostring(ks.Link), C.Gold, "🔗")
 				end
 			end)
 		end
+
+		local attempts, lockedUntil, checking = 0, 0, false
 		local function try()
-			local input = (box.Text:gsub("%s+", ""))
-			if check(input) then
-				if ks.SaveKey and fsOK() then
-					ensureFolder()
-					pcall(writefile, file, input)
-				end
-				done:Fire(true)
-			else
-				status.TextColor3 = C.Red
-				status.Text = L("Wrong key")
-				local p = gate.Position
-				for _, dx in ipairs({ 8, -8, 5, -5, 0 }) do
-					Tween(gate, { Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset) }, 0.05)
-					task.wait(0.05)
-				end
+			if checking then return end
+			local now = os.time()
+			if now < lockedUntil then
+				setStatus(string.format(L("Locked %ds"), lockedUntil - now), C.Red, "🔒")
+				return
 			end
+			local input = (mask and realText or box.Text):gsub("%s+", "")
+			if ks.AutoUppercase ~= false then input = input:upper() end
+			if input == "" then
+				setStatus(L("Enter key"), C.Gold, "!")
+				return
+			end
+			checking = true
+			submit.Text = L("Checking...")
+			submit.BackgroundTransparency = 0.5
+			Tween(boxStroke, { Color = T.Accent, Transparency = 0 }, 0.15)
+			task.spawn(function()
+				local valid, expires = check(input)
+				-- tiny delay so the UI feels responsive even when Check is instant
+				task.wait(0.15)
+				checking = false
+				submit.Text = L("Submit")
+				submit.BackgroundTransparency = 0
+				if valid then
+					local doSave = allowSave and (showRemember and rememberCb.CurrentValue or true)
+					if doSave and fsOK() then
+						ensureFolder()
+						pcall(writefile, file, input)
+					elseif showRemember and not rememberCb.CurrentValue and fsOK() then
+						pcall(function() if isfile and isfile(file) and delfile then delfile(file) end end)
+					end
+					setStatus(L("Welcome"), C.Green, "✓")
+					Tween(gate, { Size = UDim2.fromOffset(340, gateH - 4) }, 0.12, Enum.EasingStyle.Back)
+					task.wait(0.45)
+					done:Fire(true)
+				else
+					attempts = attempts + 1
+					setStatus(L("Wrong key"), C.Red, "✗")
+					Tween(boxStroke, { Color = C.Red }, 0.15)
+					task.delay(0.7, function() Tween(boxStroke, { Color = T.Line }, 0.2) end)
+					local p = gate.Position
+					for _, dx in ipairs({ 8, -8, 5, -5, 0 }) do
+						Tween(gate, { Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset) }, 0.05)
+						task.wait(0.05)
+					end
+					local maxAtt = tonumber(ks.MaxAttempts) or 0
+					if maxAtt > 0 and attempts >= maxAtt then
+						attempts = 0
+						local cd = tonumber(ks.Cooldown) or 30
+						lockedUntil = os.time() + cd
+						setStatus(string.format(L("Locked %ds"), cd), C.Red, "🔒")
+					end
+				end
+			end)
 		end
+
+		-- Masking + auto-uppercase sync. When focused we show the real text so the
+		-- user can edit; when unfocused we render dots if Mask is on.
+		box:GetPropertyChangedSignal("Text"):Connect(function()
+			if box:IsFocused() then
+				local t = box.Text
+				if ks.AutoUppercase ~= false then t = t:upper() end
+				realText = t
+				if t ~= box.Text then box.Text = t end
+			end
+		end)
+		box.Focused:Connect(function()
+			Tween(boxStroke, { Color = T.Accent, Transparency = 0 }, 0.15)
+			if mask then box.Text = realText end
+		end)
+		box.FocusLost:Connect(function(enter)
+			Tween(boxStroke, { Color = T.Line, Transparency = 0.85 }, 0.15)
+			if mask then box.Text = string.rep("•", #realText) end
+			if enter then try() end
+		end)
+
 		submit.MouseButton1Click:Connect(try)
-		box.FocusLost:Connect(function(enter) if enter then try() end end)
 		closeB.MouseButton1Click:Connect(function() done:Fire(false) end)
+
+		-- Keyboard shortcuts: Esc closes, Enter submits
+		local kpConn = UIS.InputBegan:Connect(function(i, gpe)
+			if gpe then return end
+			if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
+			if i.KeyCode == Enum.KeyCode.Escape then
+				done:Fire(false)
+			elseif i.KeyCode == Enum.KeyCode.Return then
+				try()
+			end
+		end)
+		-- Safety: if the ScreenGui is destroyed externally (anti-destroy / cleanup),
+		-- unblock the Wait so CreateWindow doesn't hang forever.
+		local destrConn = Gui.Destroying:Connect(function()
+			pcall(function() done:Fire(false) end)
+		end)
+
 		local ok = done.Event:Wait()
+		pcall(function() kpConn:Disconnect() end)
+		pcall(function() destrConn:Disconnect() end)
 		done:Destroy()
 		if not ok then
 			W:Destroy()
