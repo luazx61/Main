@@ -1,7 +1,7 @@
 --[[
 	Lumen v2.0 - one library, glass hub UI for Roblox (Luau)
 
-	Window  : CreateWindow{ Name, Subtitle, Theme, Accent, Language, Labels, Size, ToggleKey, KeySystem, MobileButton }
+	Window  : CreateWindow{ Blur (frosted background), Name, Subtitle, Theme, Accent, Language, Labels, Size, ToggleKey, KeySystem, MobileButton }
 	Tabs    : Window:CreateTab(name, icon) | Window:CreateHomeTab() | Tab:Split(leftWidth) -> left, right
 	Controls: CreateSection, CreateLabel, CreateParagraph, CreateDivider, CreateButton, CreateToggle,
 	          CreateSlider, CreateDropdown (search + multi), CreateInput, CreateKeybind, CreateColorPicker,
@@ -11,6 +11,7 @@
 	Built-in: CreateUISettings (theme / accent / scale / transparency / toggle key), CreateConfigManager
 	Keys    : KeySystem = { Keys = {..}, KeyUrl = "raw url, one key per line", Check = function(key) end, Link = "get-key url",
 	          SaveKey = true, ExpireHours = 24, MaxAttempts = 3, Cooldown = 15, CaseInsensitive = false, OnSuccess = function(key) end }
+	Extras  : CreateTabSection(title), CreateWatermark(label), Keybind Mode = "Hold" (Callback receives true/false)
 	Window  : Dialog{Title, Content, Buttons = {{Name, Primary, Callback}}}, AutoLoad(name), AutoSave(name, seconds)
 	Window  : Notify{Title, Content, Duration, Type}, SetTheme, SetAccent, SetUIScale, SetTransparency,
 	          SetToggleKey, SetVisible, Toggle, Minimize, Destroy
@@ -37,15 +38,15 @@ local C = {
 }
 
 Lumen.Accents = {
-	Blue = rgb(66, 120, 214), Violet = rgb(124, 104, 210), Emerald = rgb(48, 168, 120),
+	Blue = rgb(76, 130, 230), Violet = rgb(124, 104, 210), Emerald = rgb(48, 168, 120),
 	Crimson = rgb(206, 78, 100), Gold = rgb(208, 160, 58), Cyan = rgb(54, 166, 196),
 }
 
 Lumen.Themes = {
 	Glass = {
-		Window1 = rgb(34, 42, 68), Window2 = rgb(14, 18, 30), WinT = 0.12, Panel = rgb(14, 18, 30),
-		Card = rgb(10, 14, 26), CardT = 0.3, Text = rgb(214, 220, 236), Sub = rgb(134, 143, 170),
-		Off = rgb(58, 66, 92), Line = C.White, LineT = 0.86, Accent = Lumen.Accents.Blue,
+		Window1 = rgb(96, 116, 166), Window2 = rgb(30, 38, 68), WinT = 0.4, Panel = rgb(16, 22, 44), PanT = 0.5,
+		Card = rgb(12, 18, 38), CardT = 0.32, Text = rgb(252, 253, 255), Sub = rgb(200, 208, 228),
+		Off = rgb(84, 98, 140), Line = C.White, LineT = 0.8, Accent = Lumen.Accents.Blue,
 	},
 	Midnight = {
 		Window1 = rgb(18, 18, 24), Window2 = rgb(8, 8, 12), WinT = 0.05, Panel = rgb(12, 12, 18),
@@ -53,14 +54,14 @@ Lumen.Themes = {
 	},
 	Ocean = {
 		Window1 = rgb(20, 46, 66), Window2 = rgb(8, 22, 34), Panel = rgb(10, 26, 40), Card = rgb(10, 30, 46),
-		Sub = rgb(140, 175, 195), Off = rgb(40, 70, 92), Accent = Lumen.Accents.Cyan,
+		Sub = rgb(186, 214, 228), Off = rgb(40, 70, 92), Accent = Lumen.Accents.Cyan,
 	},
 	Rose = {
 		Window1 = rgb(60, 32, 44), Window2 = rgb(26, 14, 20), Panel = rgb(30, 18, 24), Card = rgb(34, 20, 28),
-		Sub = rgb(190, 150, 165), Off = rgb(84, 56, 68), Accent = Lumen.Accents.Crimson,
+		Sub = rgb(228, 190, 204), Off = rgb(84, 56, 68), Accent = Lumen.Accents.Crimson,
 	},
 	Light = {
-		Window1 = rgb(246, 247, 251), Window2 = rgb(226, 229, 238), WinT = 0.04, Panel = rgb(255, 255, 255),
+		Window1 = rgb(246, 247, 251), Window2 = rgb(226, 229, 238), WinT = 0.04, PanT = 0.35, Panel = rgb(255, 255, 255),
 		Card = rgb(255, 255, 255), CardT = 0.25, Text = rgb(28, 32, 46), Sub = rgb(100, 106, 124),
 		Off = rgb(200, 205, 218), Line = rgb(120, 128, 160), LineT = 0.7, Accent = Lumen.Accents.Violet,
 	},
@@ -345,18 +346,27 @@ function Lumen:CreateWindow(cfg)
 	local TOP = 58
 	local hidden, minimized, userScale = true, false, 1
 	local locked = false
+	local blur
+	if cfg.Blur then
+		pcall(function()
+			blur = Instance.new("BlurEffect")
+			blur.Name = "LumenBlur"
+			blur.Size = 0
+			blur.Parent = game:GetService("Lighting")
+		end)
+	end
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
 	local Main = New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 14), Size = UDim2.fromOffset(WIDTH, HEIGHT),
 		BackgroundColor3 = C.White, BorderSizePixel = 0, ClipsDescendants = true, Visible = false, Active = true, Parent = Gui,
-	}, { Corner(18) })
+	}, { Corner(24) })
 	bind(Main, "BackgroundTransparency", "WinT")
 	local grad = New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2), Parent = Main })
 	onTheme(function() grad.Color = ColorSequence.new(T.Window1, T.Window2) end)
 	local mainStroke = New("UIStroke", { Thickness = 1.5, Parent = Main })
 	bind(mainStroke, "Color", "Line")
-	mainStroke.Transparency = 0.82
+	mainStroke.Transparency = 0.7
 	local Scale = New("UIScale", { Parent = Main })
 	local function fit()
 		local cam = workspace.CurrentCamera
@@ -426,10 +436,11 @@ function Lumen:CreateWindow(cfg)
 	-- body: sidebar + pages ------------------------------------------------------------
 	local Body = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, TOP + 8), Size = UDim2.new(1, 0, 1, -(TOP + 8)), Parent = Main })
 	local SideWrap = New("Frame", {
-		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0, 150, 1, -14), BackgroundTransparency = 0.5, BorderSizePixel = 0,
+		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0, 150, 1, -14), BorderSizePixel = 0,
 		ClipsDescendants = true, Parent = Body,
-	}, { Corner(14) })
+	}, { Corner(18) })
 	bind(SideWrap, "BackgroundColor3", "Card")
+	bind(SideWrap, "BackgroundTransparency", "PanT")
 	local sideStroke = New("UIStroke", { Thickness = 1.2, Parent = SideWrap })
 	bind(sideStroke, "Color", "Line")
 	bind(sideStroke, "Transparency", "LineT")
@@ -517,10 +528,10 @@ function Lumen:CreateWindow(cfg)
 			local s = New("UIStroke", { Thickness = 1.5, Parent = f })
 			if neon == "accent" then
 				bind(s, "Color", "Accent")
-				s.Transparency = 0.72
+				s.Transparency = 0.4
 			elseif typeof(neon) == "Color3" then
 				s.Color = neon
-				s.Transparency = 0.62
+				s.Transparency = 0.35
 			else
 				bind(s, "Color", "Line")
 				bind(s, "Transparency", "LineT")
@@ -923,9 +934,16 @@ function Lumen:CreateWindow(cfg)
 					o:Set(k)
 					safe(c.ChangedCallback, k)
 				elseif not gpe and not Lumen.Listening and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
-					safe(c.Callback)
+					safe(c.Callback, c.Mode == "Hold" and true or nil)
 				end
 			end))
+			if c.Mode == "Hold" then
+				conn(UIS.InputEnded:Connect(function(i)
+					if i.UserInputType == Enum.UserInputType.Keyboard and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
+						safe(c.Callback, false)
+					end
+				end))
+			end
 			reg(c.Flag, o, o.CurrentKeybind)
 			return base(f, o)
 		end
@@ -1035,7 +1053,7 @@ function Lumen:CreateWindow(cfg)
 			for i, t in ipairs(chipData) do
 				local ch = New("TextLabel", {
 					LayoutOrder = i, Size = UDim2.new(1 / #chipData, -4, 1, 0), BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, Text = t, Parent = chips,
-				}, { Corner(11), New("UIStroke", { Thickness = 1, Color = C.Green, Transparency = 0.68 }) })
+				}, { Corner(11), New("UIStroke", { Thickness = 1.2, Color = C.Green, Transparency = 0.45 }) })
 				bind(ch, "BackgroundColor3", "Panel")
 				bind(ch, "TextColor3", "Text")
 			end
@@ -1049,7 +1067,7 @@ function Lumen:CreateWindow(cfg)
 			local vls = {}
 			for i, d in ipairs(defs) do
 				local b = New("Frame", { LayoutOrder = i, Size = UDim2.new(1 / #defs, -math.ceil(8 * (#defs - 1) / #defs), 1, 0), BackgroundTransparency = 0.35, BorderSizePixel = 0, Parent = stats }, {
-					Corner(10), New("UIStroke", { Thickness = 1.2, Color = d.Color, Transparency = 0.55 }),
+					Corner(10), New("UIStroke", { Thickness = 1.4, Color = d.Color, Transparency = 0.3 }),
 				})
 				bind(b, "BackgroundColor3", "Panel")
 				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold, TextSize = 15, TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = d.Color, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
@@ -1221,10 +1239,20 @@ function Lumen:CreateWindow(cfg)
 	----------------------------------------------------------------------
 	-- Tabs
 	----------------------------------------------------------------------
+	local sideOrder = 0
+	local function nextOrder() sideOrder = sideOrder + 1 return sideOrder end
+
+	function W:CreateTabSection(title)
+		local l = text(Sidebar, string.upper(title or ""), 9, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 18))
+		l.LayoutOrder = nextOrder()
+		l.TextTransparency = 0.25
+		return l
+	end
+
 	function W:CreateTab(name, icon)
 		local Tab = { Name = name }
 		local btn = New("TextButton", {
-			LayoutOrder = #W.Tabs + 1, Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
+			LayoutOrder = nextOrder(), Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
 			Text = "", AutoButtonColor = false, Parent = Sidebar,
 		}, { Corner(10) })
 		local bar = New("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(3, 0), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = btn }, { Corner(2) })
@@ -1235,21 +1263,28 @@ function Lumen:CreateWindow(cfg)
 		})
 
 		local page = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = Pages })
-		local Scroll = New("ScrollingFrame", {
-			Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
-			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = page,
-		}, { List(10), Pad(3, 3, 7, 10) })
+		local function makePanel(pos, size)
+			local panel = New("Frame", { Position = pos, Size = size, BorderSizePixel = 0, ClipsDescendants = true, Parent = page }, { Corner(18) })
+			bind(panel, "BackgroundColor3", "Card")
+			bind(panel, "BackgroundTransparency", "PanT")
+			local pst = New("UIStroke", { Thickness = 1.2, Parent = panel })
+			bind(pst, "Color", "Line")
+			bind(pst, "Transparency", "LineT")
+			local sc = New("ScrollingFrame", {
+				Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
+				CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = panel,
+			}, { List(10), Pad(10, 10, 10, 12) })
+			return sc, panel
+		end
+		local Scroll, basePanel = makePanel(UDim2.new(), UDim2.fromScale(1, 1))
 		Tab.Page = page
 		attachElements(Tab, Scroll)
 
 		function Tab:Split(leftWidth)
-			Scroll.Visible = false
+			basePanel.Visible = false
 			leftWidth = leftWidth or 0.46
 			local function col(pos, size)
-				local s = New("ScrollingFrame", {
-					Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
-					CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = page,
-				}, { List(10), Pad(3, 3, 7, 10) })
+				local s = makePanel(pos, size)
 				local h = {}
 				attachElements(h, s)
 				return h
@@ -1259,7 +1294,7 @@ function Lumen:CreateWindow(cfg)
 
 		local function paint(active, instant)
 			local d = instant and 0 or 0.25
-			Tween(btn, { BackgroundColor3 = active and T.Accent or T.Off, BackgroundTransparency = active and 0.42 or 0.75 }, d)
+			Tween(btn, { BackgroundColor3 = active and T.Accent or T.Off, BackgroundTransparency = active and 0.08 or 0.6 }, d)
 			Tween(bar, { Size = UDim2.fromOffset(3, active and 18 or 0), BackgroundTransparency = active and 0 or 1 }, d)
 			local col = active and C.White or T.Sub
 			if ic:IsA("TextLabel") then Tween(ic, { TextColor3 = col }, d) else Tween(ic, { ImageColor3 = col }, d) end
@@ -1280,8 +1315,8 @@ function Lumen:CreateWindow(cfg)
 		end
 		onTheme(function() paint(W.ActiveTab == Tab, true) end)
 		btn.MouseButton1Click:Connect(function() Tab:Select() end)
-		btn.MouseEnter:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.6 }, 0.12) end end)
-		btn.MouseLeave:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.75 }, 0.12) end end)
+		btn.MouseEnter:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.45 }, 0.12) end end)
+		btn.MouseLeave:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.6 }, 0.12) end end)
 
 		W.Tabs[#W.Tabs + 1] = Tab
 		if #W.Tabs == 1 then Tab:Select() end
@@ -1305,6 +1340,7 @@ function Lumen:CreateWindow(cfg)
 	function W:SetVisible(v)
 		if locked and v then return end
 		hidden = not v
+		if blur then Tween(blur, { Size = v and (cfg.BlurSize or 14) or 0 }, 0.3) end
 		if v then
 			if not Main.Visible then Scale.Scale = fit() * 0.9 end
 			Main.Visible = true
@@ -1350,10 +1386,42 @@ function Lumen:CreateWindow(cfg)
 	end
 	function W:Destroy()
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+		if blur then blur:Destroy() end
 		Gui:Destroy()
 		for i, w in ipairs(Lumen.Windows) do
 			if w == W then table.remove(Lumen.Windows, i) break end
 		end
+	end
+
+	-- watermark (small draggable overlay: name - fps - ping) ---------------------------
+	function W:CreateWatermark(label)
+		local f = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 44), Size = UDim2.fromOffset(0, 26),
+			AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 0.15, BorderSizePixel = 0, Active = true, Parent = Gui,
+		}, { Corner(13), Pad(12, 0, 12, 0) })
+		bind(f, "BackgroundColor3", "Panel")
+		local st = New("UIStroke", { Thickness = 1, Transparency = 0.7, Parent = f })
+		bind(st, "Color", "Accent")
+		local t = New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
+			Font = Enum.Font.GothamMedium, TextSize = 11, Text = "", Parent = f,
+		})
+		bind(t, "TextColor3", "Text")
+		onTick(function()
+			t.Text = (label or cfg.Name or "Lumen") .. "  |  " .. Live.FPS .. " fps  |  " .. Live.Ping .. " ms"
+		end)
+		local dragging, sm, sp
+		f.InputBegan:Connect(function(i)
+			if isPress(i) then dragging, sm, sp = true, i.Position, f.Position end
+		end)
+		conn(UIS.InputChanged:Connect(function(i)
+			if dragging and isMove(i) then
+				local d = i.Position - sm
+				f.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+			end
+		end))
+		conn(UIS.InputEnded:Connect(function(i) if isPress(i) then dragging = false end end))
+		return { Frame = f, SetVisible = function(_, v) f.Visible = v end, Destroy = function() f:Destroy() end }
 	end
 
 	-- config helpers -----------------------------------------------------------------
