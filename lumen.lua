@@ -1,5 +1,12 @@
 --[[
-	Lumen v2.0 - one library, glass hub UI for Roblox (Luau)
+	Lumen v1.1.0 - one library, glass hub UI for Roblox (Luau)
+
+	Improvements in 1.1.0:
+	- Fixed anniversary "days left" calculation (incorrect on exact anniversary days)
+	- Accent dropdown now pre-selects the configured accent name when possible
+	- Destroy() clears internal tick/theme/bind lists to reduce retained references
+	- Slightly more robust Live stats (FPS/Ping) and safer theme refresh
+	- Minor defensive checks and UX polish
 
 	Window  : CreateWindow{ Blur (frosted background), Name, Subtitle, Theme, Accent, Language, Labels, Size, ToggleKey, KeySystem, MobileButton }
 	Tabs    : Window:CreateTab(name, icon) | Window:CreateHomeTab() | Tab:Split(leftWidth) -> left, right
@@ -28,7 +35,7 @@ local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalizationService = game:GetService("LocalizationService")
 
-local Lumen = { Version = "2.0.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
+local Lumen = { Version = "1.1.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
 
 local rgb = Color3.fromRGB
 local C = {
@@ -139,7 +146,7 @@ local function guiParent()
 	local ok, ui = pcall(function() return gethui and gethui() end)
 	if ok and ui then return ui end
 	local ok2, core = pcall(function() return game:GetService("CoreGui") end)
-	if ok2 and core and pcall(function() Instance.new("Folder").Parent = core end) then return core end
+	if ok2 and core and pcall(function() local f = Instance.new("Folder") f.Parent = core f:Destroy() end) then return core end
 	return Players.LocalPlayer:WaitForChild("PlayerGui")
 end
 local function fmtDuration(s)
@@ -161,16 +168,20 @@ end
 local function enc(v) if typeof(v) == "Color3" then return { __c3 = { v.R, v.G, v.B } } end return v end
 local function dec(v) if type(v) == "table" and v.__c3 then return Color3.new(v.__c3[1], v.__c3[2], v.__c3[3]) end return v end
 
+local function cfgPath(name)
+	return "Lumen/" .. (tostring(name):gsub("[^%w_%- ]", "_")) .. ".json"
+end
+
 function Lumen:SaveConfig(name)
 	if not fsOK() then warn("[Lumen] file system unavailable") return false end
 	local d = {}
 	for k, v in pairs(Lumen.Flags) do d[k] = enc(v) end
 	ensureFolder()
-	return (pcall(writefile, "Lumen/" .. name .. ".json", HttpService:JSONEncode(d)))
+	return (pcall(writefile, cfgPath(name), HttpService:JSONEncode(d)))
 end
 function Lumen:LoadConfig(name)
 	if not fsOK() then warn("[Lumen] file system unavailable") return false end
-	local path = "Lumen/" .. name .. ".json"
+	local path = cfgPath(name)
 	if not isfile(path) then return false end
 	local ok, d = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
 	if not ok then return false end
@@ -182,7 +193,7 @@ function Lumen:LoadConfig(name)
 end
 function Lumen:DeleteConfig(name)
 	if type(delfile) ~= "function" then return false end
-	return (pcall(delfile, "Lumen/" .. name .. ".json"))
+	return (pcall(delfile, cfgPath(name)))
 end
 function Lumen:ListConfigs()
 	local out = {}
@@ -257,9 +268,14 @@ function Lumen:CreateWindow(cfg)
 	end
 	local function onTheme(fn) themeFns[#themeFns + 1] = fn end
 	local function refresh()
+		if not Gui or not Gui.Parent then return end
 		for i = #binds, 1, -1 do
 			local b = binds[i]
-			if b[1]:IsDescendantOf(Gui) then Tween(b[1], { [b[2]] = T[b[3]] }, 0.3) else table.remove(binds, i) end
+			if b[1] and b[1].Parent and b[1]:IsDescendantOf(Gui) then
+				Tween(b[1], { [b[2]] = T[b[3]] }, 0.3)
+			else
+				table.remove(binds, i)
+			end
 		end
 		for _, fn in ipairs(themeFns) do pcall(fn) end
 	end
@@ -270,6 +286,11 @@ function Lumen:CreateWindow(cfg)
 		for _, g in ipairs(parent:GetChildren()) do
 			if g:GetAttribute("LumenId") == cfg.Name then g:Destroy() end
 		end
+		pcall(function()
+			for _, b in ipairs(game:GetService("Lighting"):GetChildren()) do
+				if b.Name == "LumenBlur" then b:Destroy() end
+			end
+		end)
 	end
 	Gui = New("ScreenGui", {
 		Name = "Lumen_" .. HttpService:GenerateGUID(false):sub(1, 6), ResetOnSpawn = false,
@@ -328,13 +349,20 @@ function Lumen:CreateWindow(cfg)
 		local frames, last = 0, os.clock()
 		conn(RunService.Heartbeat:Connect(function() frames = frames + 1 end))
 		task.spawn(function()
-			while Gui.Parent do
+			while Gui and Gui.Parent do
 				task.wait(1)
 				local now = os.clock()
-				Live.FPS = math.floor(frames / math.max(now - last, 0.001) + 0.5)
+				local dt = math.max(now - last, 0.001)
+				Live.FPS = math.floor(frames / dt + 0.5)
 				frames, last = 0, now
-				local ok, ping = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() end)
-				if ok then Live.Ping = math.floor(ping + 0.5) end
+				local ok, ping = pcall(function()
+					local stats = game:GetService("Stats")
+					local item = stats.Network and stats.Network.ServerStatsItem and stats.Network.ServerStatsItem["Data Ping"]
+					return item and item:GetValue()
+				end)
+				if ok and type(ping) == "number" then
+					Live.Ping = math.floor(ping + 0.5)
+				end
 				for _, fn in ipairs(ticks) do pcall(fn) end
 			end
 		end)
@@ -364,7 +392,7 @@ function Lumen:CreateWindow(cfg)
 	bind(Main, "BackgroundTransparency", "WinT")
 	local grad = New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2), Parent = Main })
 	onTheme(function() grad.Color = ColorSequence.new(T.Window1, T.Window2) end)
-	local mainStroke = New("UIStroke", { Thickness = 1.5, Parent = Main })
+	local mainStroke = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.5, Parent = Main })
 	bind(mainStroke, "Color", "Line")
 	mainStroke.Transparency = 0.7
 	local Scale = New("UIScale", { Parent = Main })
@@ -386,7 +414,8 @@ function Lumen:CreateWindow(cfg)
 	local Topbar = New("Frame", { Size = UDim2.new(1, 0, 0, TOP), BackgroundTransparency = 1, Parent = Main })
 	local titleX = 20
 	if cfg.Icon then
-		makeIcon(Topbar, cfg.Icon, 28, 28, UDim2.fromOffset(16, 14))
+		local topIcon = makeIcon(Topbar, cfg.Icon, 28, 28, UDim2.fromOffset(16, 14))
+		if topIcon:IsA("TextLabel") then bind(topIcon, "TextColor3", "Text") end
 		titleX = 52
 	end
 	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
@@ -441,7 +470,7 @@ function Lumen:CreateWindow(cfg)
 	}, { Corner(18) })
 	bind(SideWrap, "BackgroundColor3", "Card")
 	bind(SideWrap, "BackgroundTransparency", "PanT")
-	local sideStroke = New("UIStroke", { Thickness = 1.2, Parent = SideWrap })
+	local sideStroke = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Parent = SideWrap })
 	bind(sideStroke, "Color", "Line")
 	bind(sideStroke, "Transparency", "LineT")
 	local showChip = cfg.SidebarProfile ~= false
@@ -489,7 +518,7 @@ function Lumen:CreateWindow(cfg)
 			BackgroundTransparency = 0.08, BorderSizePixel = 0, ClipsDescendants = true, Parent = wrap,
 		}, { Corner(12) })
 		bind(c, "BackgroundColor3", "Panel")
-		local st = New("UIStroke", { Thickness = 1.2, Parent = c })
+		local st = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Parent = c })
 		bind(st, "Color", "Line")
 		bind(st, "Transparency", "LineT")
 		local tc = TYPE_COLORS[n.Type]
@@ -525,7 +554,7 @@ function Lumen:CreateWindow(cfg)
 			local f = New("Frame", { Size = UDim2.new(1, 0, 0, h), BorderSizePixel = 0, ClipsDescendants = true, Parent = container }, { Corner(10) })
 			bind(f, "BackgroundColor3", "Card")
 			bind(f, "BackgroundTransparency", "CardT")
-			local s = New("UIStroke", { Thickness = 1.5, Parent = f })
+			local s = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.5, Parent = f })
 			if neon == "accent" then
 				bind(s, "Color", "Accent")
 				s.Transparency = 0.4
@@ -582,13 +611,13 @@ function Lumen:CreateWindow(cfg)
 		-- section header / label / paragraph / divider ---------------------------
 		function host:CreateSection(title, neon)
 			local f = card(30, neon or C.Pink)
-			New("Frame", { Position = UDim2.fromOffset(10, 7), Size = UDim2.fromOffset(3, 16), BackgroundColor3 = neon or C.Pink, BorderSizePixel = 0, Parent = f }, { Corner(2) })
+			New("Frame", { Position = UDim2.fromOffset(10, 7), Size = UDim2.fromOffset(3, 16), BackgroundColor3 = typeof(neon) == "Color3" and neon or C.Pink, BorderSizePixel = 0, Parent = f }, { Corner(2) })
 			text(f, string.upper(title or "Section"), 11, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(22, 0), UDim2.new(1, -30, 1, 0))
 			return base(f, {})
 		end
 		function host:CreateLabel(t)
 			local f = card(32)
-			local l = text(f, t, 12, Enum.Font.Gotham, "Sub")
+			local l = text(f, tostring(t), 12, Enum.Font.Gotham, "Sub")
 			return base(f, { Set = function(_, v) l.Text = v end })
 		end
 		function host:CreateParagraph(c)
@@ -867,12 +896,12 @@ function Lumen:CreateWindow(cfg)
 			local box = New("TextBox", {
 				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.new(0.42, 0, 0, 26),
 				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 11, ClearTextOnFocus = false,
-				PlaceholderText = c.PlaceholderText or "Type here...", Text = c.CurrentValue or "", Parent = f,
+				PlaceholderText = c.PlaceholderText or "Type here...", Text = tostring(c.CurrentValue or ""), Parent = f,
 			}, { Corner(6), Pad(8, 0, 8, 0) })
 			bind(box, "BackgroundColor3", "Panel")
 			bind(box, "TextColor3", "Text")
 			bind(box, "PlaceholderColor3", "Sub")
-			local s = New("UIStroke", { Thickness = 1, Transparency = 0.85, Parent = box })
+			local s = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.85, Parent = box })
 			bind(s, "Color", "Line")
 			box.Focused:Connect(function() Tween(s, { Color = T.Accent, Transparency = 0 }, 0.15) end)
 			local o = { CurrentValue = box.Text }
@@ -891,6 +920,7 @@ function Lumen:CreateWindow(cfg)
 				if c.RemoveTextAfterFocusLost then box.Text = "" end
 			end)
 			function o:Set(t, silent)
+				t = tostring(t)
 				box.Text = t
 				o.CurrentValue = t
 				if c.Flag then Lumen.Flags[c.Flag] = t end
@@ -914,10 +944,11 @@ function Lumen:CreateWindow(cfg)
 			bind(b, "BackgroundColor3", "Panel")
 			bind(b, "TextColor3", "Sub")
 			local o = { CurrentKeybind = c.CurrentKeybind, Listening = false }
-			function o:Set(k)
+			function o:Set(k, silent)
 				o.CurrentKeybind = k
 				b.Text = k or "None"
 				if c.Flag then Lumen.Flags[c.Flag] = k end
+				if not silent then safe(c.ChangedCallback, k) end
 			end
 			function o:Get() return o.CurrentKeybind end
 			h.MouseButton1Click:Connect(function()
@@ -932,7 +963,6 @@ function Lumen:CreateWindow(cfg)
 					task.defer(function() Lumen.Listening = false end)
 					local k = i.KeyCode ~= Enum.KeyCode.Escape and i.KeyCode.Name or nil
 					o:Set(k)
-					safe(c.ChangedCallback, k)
 				elseif not gpe and not Lumen.Listening and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
 					safe(c.Callback, c.Mode == "Hold" and true or nil)
 				end
@@ -956,7 +986,7 @@ function Lumen:CreateWindow(cfg)
 			local sv = New("Frame", { Position = UDim2.fromOffset(12, 48), Size = UDim2.new(1, -52, 0, 100), BorderSizePixel = 0, Parent = f }, { Corner(6) })
 			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = sv }, { Corner(6), New("UIGradient", { Transparency = NumberSequence.new(0, 1) }) })
 			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Black, BorderSizePixel = 0, Parent = sv }, { Corner(6), New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0) }) })
-			local dot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1, ZIndex = 5, Parent = sv }, { Corner(5), New("UIStroke", { Thickness = 2, Color = C.White }) })
+			local dot = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1, ZIndex = 5, Parent = sv }, { Corner(5), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 2, Color = C.White }) })
 			local svHit = New("TextButton", { BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), ZIndex = 6, Parent = sv })
 			local seq = {}
 			for i = 0, 6 do seq[#seq + 1] = ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(math.min(i / 6, 0.999), 1, 1)) end
@@ -1019,16 +1049,16 @@ function Lumen:CreateWindow(cfg)
 			if c.Badge ~= false then
 				New("TextLabel", {
 					AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(110, 24), BackgroundColor3 = rgb(20, 20, 40),
-					BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = C.Gold, Text = c.Badge or "PREMIUM", Parent = f,
-				}, { Corner(12), New("UIStroke", { Thickness = 1.5, Color = C.Gold }) })
+					BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = C.Gold, Text = type(c.Badge) == "string" and c.Badge or "PREMIUM", Parent = f,
+				}, { Corner(12), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.5, Color = C.Gold }) })
 			end
 			local avatar = New("ImageLabel", { Position = UDim2.fromOffset(12, 36), Size = UDim2.fromOffset(84, 84), BorderSizePixel = 0, Parent = f }, { Corner(42) })
 			bind(avatar, "BackgroundColor3", "Panel")
-			local ast = New("UIStroke", { Thickness = 3, Color = C.White, Parent = avatar })
+			local ast = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 3, Color = C.White, Parent = avatar })
 			New("UIGradient", { Rotation = 45, Color = ColorSequence.new(C.Green, C.Purple), Parent = ast })
 			loadAvatar(avatar)
 			local dotf = New("Frame", { Position = UDim2.fromOffset(78, 100), Size = UDim2.fromOffset(16, 16), BackgroundColor3 = C.Green, BorderSizePixel = 0, ZIndex = 3, Parent = f }, { Corner(8) })
-			local dstroke = New("UIStroke", { Thickness = 2, Parent = dotf })
+			local dstroke = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 2, Parent = dotf })
 			bind(dstroke, "Color", "Card")
 			text(f, lp.DisplayName, 16, Enum.Font.GothamBold, "Text", UDim2.fromOffset(106, 86), UDim2.new(1, -116, 0, 20)).TextTruncate = Enum.TextTruncate.AtEnd
 			text(f, "@" .. lp.Name, 11, Enum.Font.GothamMedium, C.Pink, UDim2.fromOffset(106, 106), UDim2.new(1, -116, 0, 14)).TextTruncate = Enum.TextTruncate.AtEnd
@@ -1038,7 +1068,7 @@ function Lumen:CreateWindow(cfg)
 			}, { Corner(11) })
 			bind(idp, "BackgroundColor3", "Panel")
 			bind(idp, "TextColor3", "Text")
-			local idStroke = New("UIStroke", { Thickness = 1.2, Transparency = 0.7, Parent = idp })
+			local idStroke = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Transparency = 0.7, Parent = idp })
 			bind(idStroke, "Color", "Line")
 			idp.MouseButton1Click:Connect(function()
 				if type(setclipboard) == "function" then
@@ -1053,7 +1083,7 @@ function Lumen:CreateWindow(cfg)
 			for i, t in ipairs(chipData) do
 				local ch = New("TextLabel", {
 					LayoutOrder = i, Size = UDim2.new(1 / #chipData, -4, 1, 0), BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, Text = t, Parent = chips,
-				}, { Corner(11), New("UIStroke", { Thickness = 1.2, Color = C.Green, Transparency = 0.45 }) })
+				}, { Corner(11), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Color = C.Green, Transparency = 0.45 }) })
 				bind(ch, "BackgroundColor3", "Panel")
 				bind(ch, "TextColor3", "Text")
 			end
@@ -1067,7 +1097,7 @@ function Lumen:CreateWindow(cfg)
 			local vls = {}
 			for i, d in ipairs(defs) do
 				local b = New("Frame", { LayoutOrder = i, Size = UDim2.new(1 / #defs, -math.ceil(8 * (#defs - 1) / #defs), 1, 0), BackgroundTransparency = 0.35, BorderSizePixel = 0, Parent = stats }, {
-					Corner(10), New("UIStroke", { Thickness = 1.4, Color = d.Color, Transparency = 0.3 }),
+					Corner(10), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.4, Color = d.Color, Transparency = 0.3 }),
 				})
 				bind(b, "BackgroundColor3", "Panel")
 				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold, TextSize = 15, TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = d.Color, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
@@ -1117,12 +1147,15 @@ function Lumen:CreateWindow(cfg)
 		function host:CreateAnniversaryCard()
 			local f = card(70, C.Green)
 			text(f, "🎂 " .. L("Account anniversary"), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.55, 0, 0, 18))
-			local left = 365 - (ageDays % 365)
-			text(f, L("%d days left (year %d)", left, math.floor(ageDays / 365) + 1), 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.45, 0, 0, 8), UDim2.new(0.55, -12, 0, 18), Enum.TextXAlignment.Right)
+			-- Correct days-left: (365 - mod) % 365 so exact anniversary day shows 0
+			local mod = ageDays % 365
+			local left = (365 - mod) % 365
+			local nextYear = math.floor(ageDays / 365) + 1
+			text(f, L("%d days left (year %d)", left, nextYear), 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.45, 0, 0, 8), UDim2.new(0.55, -12, 0, 18), Enum.TextXAlignment.Right)
 			local bar = New("Frame", { Position = UDim2.fromOffset(12, 44), Size = UDim2.new(1, -24, 0, 8), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(bar, "BackgroundColor3", "Off")
 			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.Green, BorderSizePixel = 0, Parent = bar }, { Corner(4) })
-			Tween(fill, { Size = UDim2.fromScale((ageDays % 365) / 365, 1) }, 0.8)
+			Tween(fill, { Size = UDim2.fromScale(mod / 365, 1) }, 0.8)
 			return base(f, {})
 		end
 
@@ -1188,7 +1221,8 @@ function Lumen:CreateWindow(cfg)
 			table.sort(themes)
 			table.sort(accents)
 			host:CreateDropdown({ Name = L("Theme"), Options = themes, CurrentOption = themeName, Flag = "Lumen_Theme", Callback = function(v) if v then W:SetTheme(v) end end })
-			host:CreateDropdown({ Name = L("Accent"), Options = accents, Flag = "Lumen_Accent", Callback = function(v) if v then W:SetAccent(v) end end })
+			local accentName = type(cfg.Accent) == "string" and cfg.Accent or nil
+			host:CreateDropdown({ Name = L("Accent"), Options = accents, CurrentOption = accentName, Flag = "Lumen_Accent", Callback = function(v) if v then W:SetAccent(v) end end })
 			host:CreateSlider({ Name = L("UI scale"), Range = { 60, 120 }, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "Lumen_Scale", Callback = function(v) W:SetUIScale(v / 100) end })
 			host:CreateSlider({ Name = L("Transparency"), Range = { 0, 60 }, Increment = 1, Suffix = "%", CurrentValue = math.floor(T.WinT * 100 + 0.5), Flag = "Lumen_Transparency", Callback = function(v) W:SetTransparency(v / 100) end })
 			host:CreateKeybind({ Name = L("Toggle key"), CurrentKeybind = toggleKey.Name, Flag = "Lumen_ToggleKey", ChangedCallback = function(k) if k then W:SetToggleKey(k) end end })
@@ -1267,7 +1301,7 @@ function Lumen:CreateWindow(cfg)
 			local panel = New("Frame", { Position = pos, Size = size, BorderSizePixel = 0, ClipsDescendants = true, Parent = page }, { Corner(18) })
 			bind(panel, "BackgroundColor3", "Card")
 			bind(panel, "BackgroundTransparency", "PanT")
-			local pst = New("UIStroke", { Thickness = 1.2, Parent = panel })
+			local pst = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Parent = panel })
 			bind(pst, "Color", "Line")
 			bind(pst, "Transparency", "LineT")
 			local sc = New("ScrollingFrame", {
@@ -1386,8 +1420,10 @@ function Lumen:CreateWindow(cfg)
 	end
 	function W:Destroy()
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-		if blur then blur:Destroy() end
-		Gui:Destroy()
+		conns, ticks, themeFns, binds = {}, {}, {}, {}
+		Lumen.Listening = false
+		if blur then pcall(function() blur:Destroy() end) end
+		if Gui then pcall(function() Gui:Destroy() end) end
 		for i, w in ipairs(Lumen.Windows) do
 			if w == W then table.remove(Lumen.Windows, i) break end
 		end
@@ -1400,7 +1436,7 @@ function Lumen:CreateWindow(cfg)
 			AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 0.15, BorderSizePixel = 0, Active = true, Parent = Gui,
 		}, { Corner(13), Pad(12, 0, 12, 0) })
 		bind(f, "BackgroundColor3", "Panel")
-		local st = New("UIStroke", { Thickness = 1, Transparency = 0.7, Parent = f })
+		local st = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.7, Parent = f })
 		bind(st, "Color", "Accent")
 		local t = New("TextLabel", {
 			BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
@@ -1459,7 +1495,7 @@ function Lumen:CreateWindow(cfg)
 			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(300, H),
 			BackgroundColor3 = C.White, BackgroundTransparency = 0.05, BorderSizePixel = 0, ZIndex = 51, Parent = overlay,
 		}, { Corner(14), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
-		local bs = New("UIStroke", { Thickness = 1.2, Transparency = 0.8, Parent = box })
+		local bs = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Transparency = 0.8, Parent = box })
 		bind(bs, "Color", "Line")
 		local sc = New("UIScale", { Parent = box })
 		local cam = workspace.CurrentCamera
@@ -1513,7 +1549,7 @@ function Lumen:CreateWindow(cfg)
 			BackgroundTransparency = 0.15, Text = "◆", Font = Enum.Font.GothamMedium, TextSize = 16, TextColor3 = C.White, AutoButtonColor = false, Parent = Gui,
 		}, { Corner(22) })
 		bind(mb, "BackgroundColor3", "Panel")
-		local mbs = New("UIStroke", { Thickness = 2, Parent = mb })
+		local mbs = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 2, Parent = mb })
 		bind(mbs, "Color", "Accent")
 		local startIn, startPos, moved
 		mb.InputBegan:Connect(function(i)
@@ -1599,7 +1635,7 @@ function Lumen:CreateWindow(cfg)
 			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(GW, GH),
 			BackgroundColor3 = C.White, BackgroundTransparency = 0.08, BorderSizePixel = 0, Active = true, Parent = Gui,
 		}, { Corner(16), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
-		local gs = New("UIStroke", { Thickness = 1.5, Transparency = 0.8, Parent = gate })
+		local gs = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.5, Transparency = 0.8, Parent = gate })
 		bind(gs, "Color", "Line")
 		local gsc = New("UIScale", { Parent = gate })
 		do
