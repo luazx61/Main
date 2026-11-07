@@ -11,7 +11,6 @@
 	Built-in: CreateUISettings (theme / accent / scale / transparency / toggle key), CreateConfigManager
 	Keys    : KeySystem = { Keys = {..}, KeyUrl = "raw url, one key per line", Check = function(key) end, Link = "get-key url",
 	          SaveKey = true, ExpireHours = 24, MaxAttempts = 3, Cooldown = 15, CaseInsensitive = false, OnSuccess = function(key) end }
-	Extras  : CreateTabSection(title), CreateWatermark(label), Keybind Mode = "Hold" (Callback receives true/false)
 	Window  : Dialog{Title, Content, Buttons = {{Name, Primary, Callback}}}, AutoLoad(name), AutoSave(name, seconds)
 	Window  : Notify{Title, Content, Duration, Type}, SetTheme, SetAccent, SetUIScale, SetTransparency,
 	          SetToggleKey, SetVisible, Toggle, Minimize, Destroy
@@ -924,16 +923,9 @@ function Lumen:CreateWindow(cfg)
 					o:Set(k)
 					safe(c.ChangedCallback, k)
 				elseif not gpe and not Lumen.Listening and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
-					safe(c.Callback, c.Mode == "Hold" and true or nil)
+					safe(c.Callback)
 				end
 			end))
-			if c.Mode == "Hold" then
-				conn(UIS.InputEnded:Connect(function(i)
-					if i.UserInputType == Enum.UserInputType.Keyboard and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
-						safe(c.Callback, false)
-					end
-				end))
-			end
 			reg(c.Flag, o, o.CurrentKeybind)
 			return base(f, o)
 		end
@@ -1229,20 +1221,10 @@ function Lumen:CreateWindow(cfg)
 	----------------------------------------------------------------------
 	-- Tabs
 	----------------------------------------------------------------------
-	local sideOrder = 0
-	local function nextOrder() sideOrder = sideOrder + 1 return sideOrder end
-
-	function W:CreateTabSection(title)
-		local l = text(Sidebar, string.upper(title or ""), 9, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 18))
-		l.LayoutOrder = nextOrder()
-		l.TextTransparency = 0.25
-		return l
-	end
-
 	function W:CreateTab(name, icon)
 		local Tab = { Name = name }
 		local btn = New("TextButton", {
-			LayoutOrder = nextOrder(), Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
+			LayoutOrder = #W.Tabs + 1, Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
 			Text = "", AutoButtonColor = false, Parent = Sidebar,
 		}, { Corner(10) })
 		local bar = New("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(3, 0), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = btn }, { Corner(2) })
@@ -1372,37 +1354,6 @@ function Lumen:CreateWindow(cfg)
 		for i, w in ipairs(Lumen.Windows) do
 			if w == W then table.remove(Lumen.Windows, i) break end
 		end
-	end
-
-	-- watermark (small draggable overlay: name - fps - ping) ---------------------------
-	function W:CreateWatermark(label)
-		local f = New("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 44), Size = UDim2.fromOffset(0, 26),
-			AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 0.15, BorderSizePixel = 0, Active = true, Parent = Gui,
-		}, { Corner(13), Pad(12, 0, 12, 0) })
-		bind(f, "BackgroundColor3", "Panel")
-		local st = New("UIStroke", { Thickness = 1, Transparency = 0.7, Parent = f })
-		bind(st, "Color", "Accent")
-		local t = New("TextLabel", {
-			BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
-			Font = Enum.Font.GothamMedium, TextSize = 11, Text = "", Parent = f,
-		})
-		bind(t, "TextColor3", "Text")
-		onTick(function()
-			t.Text = (label or cfg.Name or "Lumen") .. "  |  " .. Live.FPS .. " fps  |  " .. Live.Ping .. " ms"
-		end)
-		local dragging, sm, sp
-		f.InputBegan:Connect(function(i)
-			if isPress(i) then dragging, sm, sp = true, i.Position, f.Position end
-		end)
-		conn(UIS.InputChanged:Connect(function(i)
-			if dragging and isMove(i) then
-				local d = i.Position - sm
-				f.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
-			end
-		end))
-		conn(UIS.InputEnded:Connect(function(i) if isPress(i) then dragging = false end end))
-		return { Frame = f, SetVisible = function(_, v) f.Visible = v end, Destroy = function() f:Destroy() end }
 	end
 
 	-- config helpers -----------------------------------------------------------------
