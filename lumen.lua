@@ -1,5 +1,5 @@
 --[[
-	Lumen v2.1 - one library, glass hub UI for Roblox (Luau)
+	Lumen v2.0 - one library, glass hub UI for Roblox (Luau)
 
 	Window  : CreateWindow{ Name, Subtitle, Theme, Accent, Language, Labels, Size, ToggleKey, KeySystem, MobileButton }
 	Tabs    : Window:CreateTab(name, icon) | Window:CreateHomeTab() | Tab:Split(leftWidth) -> left, right
@@ -9,15 +9,13 @@
 	Widgets : CreateProfileCard, CreateClockCard, CreateAnniversaryCard, CreateGameCard,
 	          CreateAccountDetails, CreateInfoRow
 	Built-in: CreateUISettings (theme / accent / scale / transparency / toggle key), CreateConfigManager
+	Keys    : KeySystem = { Keys = {..}, KeyUrl = "raw url, one key per line", Check = function(key) end, Link = "get-key url",
+	          SaveKey = true, ExpireHours = 24, MaxAttempts = 3, Cooldown = 15, CaseInsensitive = false, OnSuccess = function(key) end }
+	Extras  : CreateTabSection(title), CreateWatermark(label), Keybind Mode = "Hold" (Callback receives true/false)
+	Window  : Dialog{Title, Content, Buttons = {{Name, Primary, Callback}}}, AutoLoad(name), AutoSave(name, seconds)
 	Window  : Notify{Title, Content, Duration, Type}, SetTheme, SetAccent, SetUIScale, SetTransparency,
-	          SetToggleKey, SetVisible, Toggle, Minimize, SetTitle, SetSubtitle, Destroy
+	          SetToggleKey, SetVisible, Toggle, Minimize, Destroy
 	Library : Lumen:SaveConfig/LoadConfig/DeleteConfig/ListConfigs, Lumen:Notify
-
-	KeySystem (v2.1 improved):
-	  KeySystem = "secret" | {"k1","k2"} | {
-	    Key / Keys, Check = function(input) -> bool,
-	    SaveKey = true, Link, Title, Note, OnSuccess
-	  }
 ]]
 
 local Players = game:GetService("Players")
@@ -30,7 +28,7 @@ local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalizationService = game:GetService("LocalizationService")
 
-local Lumen = { Version = "2.1.1", Flags = {}, Options = {}, Windows = {}, Listening = false }
+local Lumen = { Version = "2.0.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
 
 local rgb = Color3.fromRGB
 local C = {
@@ -42,7 +40,6 @@ local C = {
 Lumen.Accents = {
 	Blue = rgb(66, 120, 214), Violet = rgb(124, 104, 210), Emerald = rgb(48, 168, 120),
 	Crimson = rgb(206, 78, 100), Gold = rgb(208, 160, 58), Cyan = rgb(54, 166, 196),
-	Orange = rgb(232, 140, 48), Lime = rgb(120, 196, 72), Magenta = rgb(196, 72, 168),
 }
 
 Lumen.Themes = {
@@ -94,7 +91,7 @@ Lumen.Languages = {
 		["Configs"] = "Konfigurasi", ["Config name"] = "Nama konfigurasi", ["Saved configs"] = "Tersimpan",
 		["Save"] = "Simpan", ["Load"] = "Muat", ["Delete"] = "Hapus", ["Refresh"] = "Segarkan",
 		["Saved"] = "Tersimpan", ["Loaded"] = "Dimuat", ["Deleted"] = "Dihapus", ["Copied"] = "Disalin",
-		["Wrong key"] = "Kunci salah", ["Submit"] = "Kirim", ["Get key"] = "Ambil kunci", ["Enter key"] = "Masukkan kunci",
+		["Wrong key"] = "Kunci salah", ["Are you sure?"] = "Yakin?", ["Cancel"] = "Batal", ["Paste"] = "Tempel", ["Key accepted"] = "Kunci diterima", ["Submit"] = "Kirim", ["Get key"] = "Ambil kunci", ["Enter key"] = "Masukkan kunci",
 	},
 }
 
@@ -137,26 +134,6 @@ local function safe(fn, ...)
 	if type(fn) ~= "function" then return end
 	local ok, err = pcall(fn, ...)
 	if not ok then warn("[Lumen] callback error: " .. tostring(err)) end
-end
-local function toHex(col)
-	if typeof(col) ~= "Color3" then return "FFFFFF" end
-	local ok, hex = pcall(function() return col:ToHex() end)
-	if ok and type(hex) == "string" then return hex:upper() end
-	local r = math.floor(col.R * 255 + 0.5)
-	local g = math.floor(col.G * 255 + 0.5)
-	local b = math.floor(col.B * 255 + 0.5)
-	return string.format("%02X%02X%02X", r, g, b)
-end
-local function fromHex(str)
-	str = tostring(str or ""):gsub("#", ""):upper()
-	if #str ~= 6 then return nil end
-	local ok, col = pcall(Color3.fromHex, "#" .. str)
-	if ok and typeof(col) == "Color3" then return col end
-	local r = tonumber(str:sub(1, 2), 16)
-	local g = tonumber(str:sub(3, 4), 16)
-	local b = tonumber(str:sub(5, 6), 16)
-	if r and g and b then return Color3.fromRGB(r, g, b) end
-	return nil
 end
 local function guiParent()
 	local ok, ui = pcall(function() return gethui and gethui() end)
@@ -351,18 +328,13 @@ function Lumen:CreateWindow(cfg)
 		local frames, last = 0, os.clock()
 		conn(RunService.Heartbeat:Connect(function() frames = frames + 1 end))
 		task.spawn(function()
-			while Gui and Gui.Parent do
+			while Gui.Parent do
 				task.wait(1)
-				if not (Gui and Gui.Parent) then break end
 				local now = os.clock()
 				Live.FPS = math.floor(frames / math.max(now - last, 0.001) + 0.5)
 				frames, last = 0, now
-				local ok, ping = pcall(function()
-					local s = game:GetService("Stats")
-					local item = s.Network and s.Network.ServerStatsItem and s.Network.ServerStatsItem["Data Ping"]
-					return item and item:GetValue()
-				end)
-				if ok and type(ping) == "number" then Live.Ping = math.floor(ping + 0.5) end
+				local ok, ping = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() end)
+				if ok then Live.Ping = math.floor(ping + 0.5) end
 				for _, fn in ipairs(ticks) do pcall(fn) end
 			end
 		end)
@@ -373,6 +345,7 @@ function Lumen:CreateWindow(cfg)
 	local HEIGHT = cfg.Size and cfg.Size.Y or 380
 	local TOP = 58
 	local hidden, minimized, userScale = true, false, 1
+	local locked = false
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
 	local Main = New("Frame", {
@@ -407,8 +380,8 @@ function Lumen:CreateWindow(cfg)
 		makeIcon(Topbar, cfg.Icon, 28, 28, UDim2.fromOffset(16, 14))
 		titleX = 52
 	end
-	local TitleLabel = text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
-	local SubtitleLabel = text(Topbar, string.upper(cfg.Subtitle or "Premium - Glass - Interface"), 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(titleX, 33), UDim2.new(0.6, 0, 0, 14))
+	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
+	text(Topbar, string.upper(cfg.Subtitle or "Premium - Glass - Interface"), 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(titleX, 33), UDim2.new(0.6, 0, 0, 14))
 	local line = New("Frame", { Position = UDim2.new(0, 16, 1, -1), Size = UDim2.new(1, -32, 0, 1), BackgroundColor3 = C.White, BackgroundTransparency = 0.88, BorderSizePixel = 0, Parent = Topbar })
 	bind(line, "BackgroundColor3", "Line")
 
@@ -522,7 +495,7 @@ function Lumen:CreateWindow(cfg)
 		end
 		local gone = false
 		local function dismiss()
-			if gone then return end
+			if gone or not c.Parent then return end
 			gone = true
 			Tween(c, { Position = UDim2.new(1, 320, 0, 0) }, 0.3)
 			task.delay(0.3, function() wrap:Destroy() end)
@@ -951,9 +924,16 @@ function Lumen:CreateWindow(cfg)
 					o:Set(k)
 					safe(c.ChangedCallback, k)
 				elseif not gpe and not Lumen.Listening and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
-					safe(c.Callback)
+					safe(c.Callback, c.Mode == "Hold" and true or nil)
 				end
 			end))
+			if c.Mode == "Hold" then
+				conn(UIS.InputEnded:Connect(function(i)
+					if i.UserInputType == Enum.UserInputType.Keyboard and o.CurrentKeybind and i.KeyCode.Name == o.CurrentKeybind then
+						safe(c.Callback, false)
+					end
+				end))
+			end
 			reg(c.Flag, o, o.CurrentKeybind)
 			return base(f, o)
 		end
@@ -991,15 +971,16 @@ function Lumen:CreateWindow(cfg)
 				sv.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 				dot.Position = UDim2.fromScale(s, 1 - v)
 				hdot.Position = UDim2.fromScale(0.5, h)
-				hex.Text = "#" .. toHex(col)
+				hex.Text = "#" .. col:ToHex():upper()
 				if c.Flag then Lumen.Flags[c.Flag] = col end
 				if not silent then safe(c.Callback, col) end
 			end
 			drag(svHit, sv, function(x, y) s, v = x, 1 - y apply() end)
 			drag(hueHit, hue, function(_, y) h = math.clamp(y, 0, 0.999) apply() end)
 			hex.FocusLost:Connect(function()
-				local col = fromHex(hex.Text)
-				if col then h, s, v = col:ToHSV() end
+				local str = hex.Text:gsub("#", "")
+				local ok, col = pcall(Color3.fromHex, "#" .. str)
+				if ok and col then h, s, v = col:ToHSV() end
 				apply()
 			end)
 			function o:Set(col, silent) h, s, v = col:ToHSV() apply(silent) end
@@ -1091,11 +1072,10 @@ function Lumen:CreateWindow(cfg)
 			else
 				task.spawn(function()
 					local ok, count = pcall(function()
-						local pages, n, maxPages = Players:GetFriendsAsync(lp.UserId), 0, 8
+						local pages, n = Players:GetFriendsAsync(lp.UserId), 0
 						while true do
 							n = n + #pages:GetCurrentPage()
-							if pages.IsFinished or maxPages <= 0 then break end
-							maxPages = maxPages - 1
+							if pages.IsFinished then break end
 							pages:AdvanceToNextPageAsync()
 						end
 						return n
@@ -1202,7 +1182,12 @@ function Lumen:CreateWindow(cfg)
 			host:CreateSlider({ Name = L("UI scale"), Range = { 60, 120 }, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "Lumen_Scale", Callback = function(v) W:SetUIScale(v / 100) end })
 			host:CreateSlider({ Name = L("Transparency"), Range = { 0, 60 }, Increment = 1, Suffix = "%", CurrentValue = math.floor(T.WinT * 100 + 0.5), Flag = "Lumen_Transparency", Callback = function(v) W:SetTransparency(v / 100) end })
 			host:CreateKeybind({ Name = L("Toggle key"), CurrentKeybind = toggleKey.Name, Flag = "Lumen_ToggleKey", ChangedCallback = function(k) if k then W:SetToggleKey(k) end end })
-			host:CreateButton({ Name = L("Destroy UI"), Neon = C.Red, Callback = function() W:Destroy() end })
+			host:CreateButton({ Name = L("Destroy UI"), Neon = C.Red, Callback = function()
+				W:Dialog({ Title = L("Destroy UI"), Content = L("Are you sure?"), Buttons = {
+					{ Name = L("Delete"), Primary = true, Callback = function() W:Destroy() end },
+					{ Name = L("Cancel") },
+				} })
+			end })
 		end
 
 		function host:CreateConfigManager()
@@ -1244,10 +1229,20 @@ function Lumen:CreateWindow(cfg)
 	----------------------------------------------------------------------
 	-- Tabs
 	----------------------------------------------------------------------
+	local sideOrder = 0
+	local function nextOrder() sideOrder = sideOrder + 1 return sideOrder end
+
+	function W:CreateTabSection(title)
+		local l = text(Sidebar, string.upper(title or ""), 9, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 18))
+		l.LayoutOrder = nextOrder()
+		l.TextTransparency = 0.25
+		return l
+	end
+
 	function W:CreateTab(name, icon)
 		local Tab = { Name = name }
 		local btn = New("TextButton", {
-			LayoutOrder = #W.Tabs + 1, Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
+			LayoutOrder = nextOrder(), Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = T.Off, BackgroundTransparency = 0.65,
 			Text = "", AutoButtonColor = false, Parent = Sidebar,
 		}, { Corner(10) })
 		local bar = New("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(3, 0), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = btn }, { Corner(2) })
@@ -1291,12 +1286,6 @@ function Lumen:CreateWindow(cfg)
 		paint(false, true)
 		Tab._paint = paint
 		function Tab:Select()
-			-- close any open dropdowns when switching tabs
-			if W._dropdowns then
-				for _, dd in ipairs(W._dropdowns) do
-					if dd and dd.Close then pcall(dd.Close, dd) end
-				end
-			end
 			for _, t in ipairs(W.Tabs) do
 				t.Page.Visible = false
 				t._paint(false)
@@ -1309,6 +1298,8 @@ function Lumen:CreateWindow(cfg)
 		end
 		onTheme(function() paint(W.ActiveTab == Tab, true) end)
 		btn.MouseButton1Click:Connect(function() Tab:Select() end)
+		btn.MouseEnter:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.6 }, 0.12) end end)
+		btn.MouseLeave:Connect(function() if W.ActiveTab ~= Tab then Tween(btn, { BackgroundTransparency = 0.75 }, 0.12) end end)
 
 		W.Tabs[#W.Tabs + 1] = Tab
 		if #W.Tabs == 1 then Tab:Select() end
@@ -1330,6 +1321,7 @@ function Lumen:CreateWindow(cfg)
 	-- Window controls
 	----------------------------------------------------------------------
 	function W:SetVisible(v)
+		if locked and v then return end
 		hidden = not v
 		if v then
 			if not Main.Visible then Scale.Scale = fit() * 0.9 end
@@ -1345,12 +1337,6 @@ function Lumen:CreateWindow(cfg)
 		minimized = not minimized
 		Body.Visible = not minimized
 		Tween(Main, { Size = UDim2.fromOffset(WIDTH, minimized and TOP or HEIGHT) }, 0.25)
-	end
-	function W:SetTitle(t)
-		TitleLabel.Text = tostring(t or "")
-	end
-	function W:SetSubtitle(t)
-		SubtitleLabel.Text = string.upper(tostring(t or ""))
 	end
 	function W:SetTheme(name)
 		if not Lumen.Themes[name] then return end
@@ -1382,11 +1368,113 @@ function Lumen:CreateWindow(cfg)
 	end
 	function W:Destroy()
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-		Lumen.Listening = false
 		Gui:Destroy()
 		for i, w in ipairs(Lumen.Windows) do
 			if w == W then table.remove(Lumen.Windows, i) break end
 		end
+	end
+
+	-- watermark (small draggable overlay: name - fps - ping) ---------------------------
+	function W:CreateWatermark(label)
+		local f = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 44), Size = UDim2.fromOffset(0, 26),
+			AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 0.15, BorderSizePixel = 0, Active = true, Parent = Gui,
+		}, { Corner(13), Pad(12, 0, 12, 0) })
+		bind(f, "BackgroundColor3", "Panel")
+		local st = New("UIStroke", { Thickness = 1, Transparency = 0.7, Parent = f })
+		bind(st, "Color", "Accent")
+		local t = New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
+			Font = Enum.Font.GothamMedium, TextSize = 11, Text = "", Parent = f,
+		})
+		bind(t, "TextColor3", "Text")
+		onTick(function()
+			t.Text = (label or cfg.Name or "Lumen") .. "  |  " .. Live.FPS .. " fps  |  " .. Live.Ping .. " ms"
+		end)
+		local dragging, sm, sp
+		f.InputBegan:Connect(function(i)
+			if isPress(i) then dragging, sm, sp = true, i.Position, f.Position end
+		end)
+		conn(UIS.InputChanged:Connect(function(i)
+			if dragging and isMove(i) then
+				local d = i.Position - sm
+				f.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+			end
+		end))
+		conn(UIS.InputEnded:Connect(function(i) if isPress(i) then dragging = false end end))
+		return { Frame = f, SetVisible = function(_, v) f.Visible = v end, Destroy = function() f:Destroy() end }
+	end
+
+	-- config helpers -----------------------------------------------------------------
+	function W:AutoLoad(name) return Lumen:LoadConfig(name or "autosave") end
+	function W:AutoSave(name, interval)
+		name = name or "autosave"
+		local last
+		task.spawn(function()
+			while Gui.Parent do
+				task.wait(interval or 10)
+				local d = {}
+				for k, v in pairs(Lumen.Flags) do d[k] = enc(v) end
+				local ok, json = pcall(function() return HttpService:JSONEncode(d) end)
+				if ok and json ~= last then
+					last = json
+					Lumen:SaveConfig(name)
+				end
+			end
+		end)
+	end
+
+	-- modal dialog ---------------------------------------------------------------------
+	function W:Dialog(d)
+		d = d or {}
+		local overlay = New("TextButton", {
+			Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Black,
+			BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 50, Parent = Gui,
+		})
+		Tween(overlay, { BackgroundTransparency = 0.55 }, 0.2)
+		local content = d.Content or ""
+		local ok, size = pcall(function() return TextService:GetTextSize(content, 12, Enum.Font.Gotham, Vector2.new(260, 1000)) end)
+		local bodyH = content == "" and 0 or (ok and size.Y or 30)
+		local H = 20 + 22 + 8 + bodyH + 18 + 34 + 16
+		local box = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(300, H),
+			BackgroundColor3 = C.White, BackgroundTransparency = 0.05, BorderSizePixel = 0, ZIndex = 51, Parent = overlay,
+		}, { Corner(14), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
+		local bs = New("UIStroke", { Thickness = 1.2, Transparency = 0.8, Parent = box })
+		bind(bs, "Color", "Line")
+		local sc = New("UIScale", { Parent = box })
+		local cam = workspace.CurrentCamera
+		local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+		local fitS = math.min(0.9, (vp.X - 40) / 300, (vp.Y - 40) / H)
+		sc.Scale = fitS * 0.9
+		Tween(sc, { Scale = fitS }, 0.25, Enum.EasingStyle.Back)
+		text(box, d.Title or "Notice", 15, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(20, 18), UDim2.new(1, -40, 0, 22))
+		if content ~= "" then
+			local b = text(box, content, 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 48), UDim2.new(1, -40, 0, bodyH))
+			b.TextWrapped = true
+			b.TextYAlignment = Enum.TextYAlignment.Top
+		end
+		local function close()
+			Tween(overlay, { BackgroundTransparency = 1 }, 0.15)
+			Tween(sc, { Scale = fitS * 0.9 }, 0.15)
+			task.delay(0.16, function() overlay:Destroy() end)
+		end
+		local btns = d.Buttons or { { Name = "OK", Primary = true } }
+		local n = #btns
+		local w = (260 - 8 * (n - 1)) / n
+		for i, bd in ipairs(btns) do
+			local b = New("TextButton", {
+				Position = UDim2.fromOffset(20 + (i - 1) * (w + 8), H - 16 - 34), Size = UDim2.fromOffset(w, 34),
+				BackgroundTransparency = bd.Primary and 0 or 0.3, Font = Enum.Font.GothamMedium, TextSize = 12,
+				Text = bd.Name or "OK", TextColor3 = C.White, AutoButtonColor = false, ZIndex = 52, Parent = box,
+			}, { Corner(10) })
+			bind(b, "BackgroundColor3", bd.Primary and "Accent" or "Off")
+			b.MouseButton1Click:Connect(function()
+				close()
+				safe(bd.Callback)
+			end)
+		end
+		return { Close = close }
 	end
 
 	MinBtn.MouseButton1Click:Connect(function() W:Minimize() end)
@@ -1428,148 +1516,166 @@ function Lumen:CreateWindow(cfg)
 	end
 
 	----------------------------------------------------------------------
-	-- Key system (blocks CreateWindow until a valid key is entered) - v2.1 improved
+	-- Key system (blocks CreateWindow until a valid key is entered)
 	----------------------------------------------------------------------
-	local function runKeyGate(raw)
-		-- normalize input: string | array | table
-		local ks = {}
-		if type(raw) == "string" then
-			ks.Keys = { raw }
-			ks.SaveKey = true
-		elseif type(raw) == "table" then
-			if #raw > 0 and type(raw[1]) == "string" then
-				-- array of keys
-				ks.Keys = raw
-				ks.SaveKey = true
-			else
-				ks = raw
+	local function runKeyGate(ks)
+		local function trim(x) return (tostring(x):gsub("^%s+", ""):gsub("%s+$", "")) end
+		local function norm(x)
+			x = trim(x)
+			if ks.CaseInsensitive then x = x:lower() end
+			return x
+		end
+		local remote
+		local function remoteKeys()
+			if remote then return remote end
+			remote = {}
+			if ks.KeyUrl then
+				local ok, body = pcall(function() return game:HttpGet(ks.KeyUrl) end)
+				if ok and type(body) == "string" then
+					for line in body:gmatch("[^\r\n]+") do
+						if trim(line) ~= "" then remote[#remote + 1] = line end
+					end
+				end
 			end
-		else
-			return true
+			return remote
 		end
-		if ks.Key and not ks.Keys then
-			ks.Keys = { tostring(ks.Key) }
-		end
-		if ks.SaveKey == nil then ks.SaveKey = true end
-
 		local function check(input)
+			local raw = trim(input)
+			if raw == "" then return false end
 			if type(ks.Check) == "function" then
-				local ok, r = pcall(ks.Check, input)
-				return ok and r == true
+				local ok, r = pcall(ks.Check, raw)
+				if ok and r == true then return true end
 			end
+			local want = norm(raw)
 			for _, k in ipairs(ks.Keys or {}) do
-				if input == tostring(k) then return true end
+				if norm(k) == want then return true end
+			end
+			if ks.KeyUrl then
+				for _, k in ipairs(remoteKeys()) do
+					if norm(k) == want then return true end
+				end
 			end
 			return false
 		end
 
+		-- saved key (optionally expiring)
 		local file = "Lumen/key_" .. ((cfg.Name or "ui"):gsub("[^%w_]", "_")) .. ".txt"
 		if ks.SaveKey and fsOK() then
-			local ok, saved = pcall(function()
-				if isfile(file) then return readfile(file) end
-			end)
-			if ok and saved and check(saved) then
-				if type(ks.OnSuccess) == "function" then pcall(ks.OnSuccess, saved) end
-				return true
+			local ok, saved = pcall(function() if isfile(file) then return readfile(file) end end)
+			if ok and type(saved) == "string" then
+				local ts, key = saved:match("^(%d+)\n(.*)$")
+				if not ts then ts, key = tostring(os.time()), saved end
+				local fresh = not ks.ExpireHours or (os.time() - tonumber(ts)) < ks.ExpireHours * 3600
+				if fresh and check(key) then
+					safe(ks.OnSuccess, trim(key))
+					return true
+				end
 			end
 		end
 
+		locked = true
 		local done = Instance.new("BindableEvent")
+		local GW, GH = 340, 224
 		local gate = New("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(360, 230),
-			BackgroundColor3 = C.White, BackgroundTransparency = 0.08, BorderSizePixel = 0, Parent = Gui,
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(GW, GH),
+			BackgroundColor3 = C.White, BackgroundTransparency = 0.08, BorderSizePixel = 0, Active = true, Parent = Gui,
 		}, { Corner(16), New("UIGradient", { Rotation = 135, Color = ColorSequence.new(T.Window1, T.Window2) }) })
-		local gs = New("UIStroke", { Thickness = 1.5, Transparency = 0.75, Parent = gate })
+		local gs = New("UIStroke", { Thickness = 1.5, Transparency = 0.8, Parent = gate })
 		bind(gs, "Color", "Line")
-		text(gate, ks.Title or (cfg.Name or "Lumen"), 18, Enum.Font.GothamBold, "Text", UDim2.fromOffset(20, 14), UDim2.new(1, -60, 0, 24))
-		local note = text(gate, ks.Note or L("Enter key"), 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 42), UDim2.new(1, -40, 0, 28))
+		local gsc = New("UIScale", { Parent = gate })
+		do
+			local cam = workspace.CurrentCamera
+			local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+			gsc.Scale = math.min(0.9, (vp.X - 40) / GW, (vp.Y - 40) / GH)
+		end
+		text(gate, ks.Title or (cfg.Name or "Lumen"), 17, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(20, 14), UDim2.new(1, -60, 0, 24))
+		local note = text(gate, ks.Note or L("Enter key"), 12, Enum.Font.Gotham, "Sub", UDim2.fromOffset(20, 40), UDim2.new(1, -40, 0, 30))
 		note.TextWrapped = true
 		note.TextYAlignment = Enum.TextYAlignment.Top
-		local closeB = New("TextButton", {
-			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(28, 28),
-			BackgroundTransparency = 1, Text = "×", Font = Enum.Font.GothamMedium, TextSize = 18, Parent = gate
-		})
+		local closeB = New("TextButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Text = "×", Font = Enum.Font.GothamMedium, TextSize = 16, Parent = gate })
 		bind(closeB, "TextColor3", "Sub")
+
+		local canPaste = type(getclipboard) == "function"
 		local box = New("TextBox", {
-			Position = UDim2.fromOffset(20, 84), Size = UDim2.new(1, -40, 0, 36), BackgroundTransparency = 0.18, BorderSizePixel = 0,
-			Font = Enum.Font.GothamMedium, TextSize = 13, PlaceholderText = L("Enter key"), Text = "", ClearTextOnFocus = false, Parent = gate,
-		}, { Corner(9), Pad(12, 0, 12, 0) })
+			Position = UDim2.fromOffset(20, 80), Size = UDim2.fromOffset(canPaste and 208 or 300, 34), BackgroundTransparency = 0.2, BorderSizePixel = 0,
+			Font = Enum.Font.GothamMedium, TextSize = 12, PlaceholderText = L("Enter key"), Text = "", ClearTextOnFocus = false, Parent = gate,
+		}, { Corner(8), Pad(10, 0, 10, 0) })
 		bind(box, "BackgroundColor3", "Panel")
 		bind(box, "TextColor3", "Text")
 		bind(box, "PlaceholderColor3", "Sub")
-		local boxStroke = New("UIStroke", { Thickness = 1.2, Transparency = 0.7, Parent = box })
-		bind(boxStroke, "Color", "Line")
-		box.Focused:Connect(function()
-			Tween(boxStroke, { Color = T.Accent, Transparency = 0.15 }, 0.15)
-		end)
-		box.FocusLost:Connect(function()
-			Tween(boxStroke, { Color = T.Line, Transparency = 0.7 }, 0.15)
-		end)
-		local status = text(gate, "", 11, Enum.Font.GothamMedium, C.Red, UDim2.fromOffset(20, 128), UDim2.new(1, -40, 0, 16))
-		local function gbtn(label, x, w, accent)
+		local status = text(gate, "", 11, Enum.Font.GothamMedium, C.Red, UDim2.fromOffset(20, 120), UDim2.new(1, -40, 0, 16))
+
+		local function gbtn(label, x, y, w, h, accent)
 			local b = New("TextButton", {
-				Position = UDim2.new(0, x, 1, -54), Size = UDim2.new(w, -28, 0, 38), BackgroundTransparency = accent and 0 or 0.28,
-				Font = Enum.Font.GothamMedium, TextSize = 13, Text = label, AutoButtonColor = false, TextColor3 = C.White, Parent = gate,
-			}, { Corner(11) })
-			if accent then bind(b, "BackgroundColor3", "Accent") else bind(b, "BackgroundColor3", "Off") end
+				Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(w, h), BackgroundTransparency = accent and 0 or 0.3,
+				Font = Enum.Font.GothamMedium, TextSize = 12, Text = label, AutoButtonColor = false, TextColor3 = C.White, Parent = gate,
+			}, { Corner(10) })
+			bind(b, "BackgroundColor3", accent and "Accent" or "Off")
 			return b
 		end
-		local hasLink = type(ks.Link) == "string" and ks.Link ~= ""
-		local submit = gbtn(L("Submit"), 20, hasLink and 0.5 or 1, true)
-		if not hasLink then submit.Size = UDim2.new(1, -40, 0, 38) end
+		if canPaste then
+			gbtn(L("Paste"), 236, 80, 84, 34, false).MouseButton1Click:Connect(function()
+				local ok, clip = pcall(getclipboard)
+				if ok and clip then box.Text = trim(clip) end
+			end)
+		end
+		local hasLink = ks.Link ~= nil
+		local bw = hasLink and 146 or 300
+		local submit = gbtn(L("Submit"), 20, GH - 52, bw, 36, true)
 		if hasLink then
-			local getB = gbtn(L("Get key"), 0, 0.5, false)
-			getB.Position = UDim2.new(0.5, 6, 1, -54)
-			getB.Size = UDim2.new(0.5, -26, 0, 38)
-			submit.Position = UDim2.new(0, 20, 1, -54)
-			submit.Size = UDim2.new(0.5, -26, 0, 38)
-			getB.MouseButton1Click:Connect(function()
+			gbtn(L("Get key"), 174, GH - 52, bw, 36, false).MouseButton1Click:Connect(function()
 				if type(setclipboard) == "function" then
 					pcall(setclipboard, ks.Link)
 					status.TextColor3 = C.Green
 					status.Text = L("Copied")
 				else
 					status.TextColor3 = C.Gold
-					status.Text = tostring(ks.Link)
+					status.Text = ks.Link
 				end
 			end)
 		end
-		local shaking = false
+
+		local attempts, lockedUntil = 0, 0
+		local busy = false
 		local function try()
-			local input = (box.Text:gsub("%s+", ""))
-			if input == "" then
-				status.TextColor3 = C.Gold
-				status.Text = L("Enter key")
-				return
-			end
-			if check(input) then
+			if busy or os.clock() < lockedUntil then return end
+			busy = true
+			if check(box.Text) then
 				if ks.SaveKey and fsOK() then
 					ensureFolder()
-					pcall(writefile, file, input)
+					pcall(writefile, file, os.time() .. "\n" .. trim(box.Text))
 				end
-				if type(ks.OnSuccess) == "function" then pcall(ks.OnSuccess, input) end
+				status.TextColor3 = C.Green
+				status.Text = L("Key accepted")
+				task.wait(0.35)
 				done:Fire(true)
-			else
-				status.TextColor3 = C.Red
-				status.Text = L("Wrong key")
-				if not shaking then
-					shaking = true
-					local p = gate.Position
-					local seq = { 10, -10, 7, -7, 4, -4, 0 }
-					task.spawn(function()
-						for _, dx in ipairs(seq) do
-							Tween(gate, { Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset) }, 0.04)
-							task.wait(0.04)
-						end
-						shaking = false
-					end)
-				end
+				return
 			end
+			attempts = attempts + 1
+			status.TextColor3 = C.Red
+			if ks.MaxAttempts and attempts >= ks.MaxAttempts then
+				attempts = 0
+				lockedUntil = os.clock() + (ks.Cooldown or 15)
+				task.spawn(function()
+					while os.clock() < lockedUntil and gate.Parent do
+						status.Text = L("Wrong key") .. " - " .. math.ceil(lockedUntil - os.clock()) .. "s"
+						task.wait(0.25)
+					end
+					if gate.Parent then status.Text = "" end
+				end)
+			else
+				status.Text = L("Wrong key") .. (ks.MaxAttempts and (" (" .. (ks.MaxAttempts - attempts) .. ")") or "")
+			end
+			local p = gate.Position
+			for _, dx in ipairs({ 8, -8, 5, -5, 0 }) do
+				Tween(gate, { Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset) }, 0.05)
+				task.wait(0.05)
+			end
+			busy = false
 		end
 		submit.MouseButton1Click:Connect(try)
 		box.FocusLost:Connect(function(enter) if enter then try() end end)
 		closeB.MouseButton1Click:Connect(function() done:Fire(false) end)
-		task.defer(function() box:CaptureFocus() end)
 		local ok = done.Event:Wait()
 		done:Destroy()
 		if not ok then
@@ -1577,6 +1683,8 @@ function Lumen:CreateWindow(cfg)
 			error("[Lumen] key window closed", 0)
 		end
 		gate:Destroy()
+		locked = false
+		safe(ks.OnSuccess, trim(box.Text))
 		return true
 	end
 
