@@ -1,12 +1,5 @@
 --[[
-	Lumen v1.1.0 - one library, glass hub UI for Roblox (Luau)
-
-	Improvements in 1.1.0:
-	- Fixed anniversary "days left" calculation (incorrect on exact anniversary days)
-	- Accent dropdown now pre-selects the configured accent name when possible
-	- Destroy() clears internal tick/theme/bind lists to reduce retained references
-	- Slightly more robust Live stats (FPS/Ping) and safer theme refresh
-	- Minor defensive checks and UX polish
+	Lumen v1.0 - one library, glass hub UI for Roblox (Luau)
 
 	Window  : CreateWindow{ Blur (frosted background), Name, Subtitle, Theme, Accent, Language, Labels, Size, ToggleKey, KeySystem, MobileButton }
 	Tabs    : Window:CreateTab(name, icon) | Window:CreateHomeTab() | Tab:Split(leftWidth) -> left, right
@@ -18,6 +11,10 @@
 	Built-in: CreateUISettings (theme / accent / scale / transparency / toggle key), CreateConfigManager
 	Keys    : KeySystem = { Keys = {..}, KeyUrl = "raw url, one key per line", Check = function(key) end, Link = "get-key url",
 	          SaveKey = true, ExpireHours = 24, MaxAttempts = 3, Cooldown = 15, CaseInsensitive = false, OnSuccess = function(key) end }
+	Status  : bottom bar with fps, ping, players, account age and game on every tab (StatusBar = false to hide)
+	Groups  : Tab:CreateFolder(name, startOpen) returns a collapsible group that takes the same element calls
+	Tools   : Tab:CreateUtilities() (anti-afk, fps cap, server hop, copy join script); CreateWindow{ Watermark = true }
+	Widgets : CreateFpsGraph(), CreateServerCard() (players, server time, place/job id, rejoin)
 	Extras  : CreateTabSection(title), CreateWatermark(label), Keybind Mode = "Hold" (Callback receives true/false)
 	Window  : Dialog{Title, Content, Buttons = {{Name, Primary, Callback}}}, AutoLoad(name), AutoSave(name, seconds)
 	Window  : Notify{Title, Content, Duration, Type}, SetTheme, SetAccent, SetUIScale, SetTransparency,
@@ -35,7 +32,7 @@ local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local LocalizationService = game:GetService("LocalizationService")
 
-local Lumen = { Version = "1.1.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
+local Lumen = { Version = "1.0.0", Flags = {}, Options = {}, Windows = {}, Listening = false }
 
 local rgb = Color3.fromRGB
 local C = {
@@ -98,7 +95,7 @@ Lumen.Languages = {
 		["Configs"] = "Konfigurasi", ["Config name"] = "Nama konfigurasi", ["Saved configs"] = "Tersimpan",
 		["Save"] = "Simpan", ["Load"] = "Muat", ["Delete"] = "Hapus", ["Refresh"] = "Segarkan",
 		["Saved"] = "Tersimpan", ["Loaded"] = "Dimuat", ["Deleted"] = "Dihapus", ["Copied"] = "Disalin",
-		["Wrong key"] = "Kunci salah", ["Are you sure?"] = "Yakin?", ["Cancel"] = "Batal", ["Paste"] = "Tempel", ["Key accepted"] = "Kunci diterima", ["Submit"] = "Kirim", ["Get key"] = "Ambil kunci", ["Enter key"] = "Masukkan kunci",
+		["Wrong key"] = "Kunci salah", ["Are you sure?"] = "Yakin?", ["Cancel"] = "Batal", ["Paste"] = "Tempel", ["Key accepted"] = "Kunci diterima", ["players"] = "pemain", ["Server"] = "Server", ["Players"] = "Pemain", ["Server time"] = "Waktu server", ["Rejoin"] = "Gabung ulang", ["Copy Job ID"] = "Salin Job ID", ["Performance"] = "Performa", ["Utilities"] = "Utilitas", ["Stops the idle kick"] = "Mencegah kick karena diam", ["FPS cap"] = "Batas FPS", ["Server hop"] = "Pindah server", ["Joins a different public server"] = "Masuk ke server publik lain", ["Could not load servers"] = "Gagal memuat server", ["No other servers found"] = "Tidak ada server lain", ["Copy join script"] = "Salin skrip join", ["Submit"] = "Kirim", ["Get key"] = "Ambil kunci", ["Enter key"] = "Masukkan kunci",
 	},
 }
 
@@ -268,14 +265,9 @@ function Lumen:CreateWindow(cfg)
 	end
 	local function onTheme(fn) themeFns[#themeFns + 1] = fn end
 	local function refresh()
-		if not Gui or not Gui.Parent then return end
 		for i = #binds, 1, -1 do
 			local b = binds[i]
-			if b[1] and b[1].Parent and b[1]:IsDescendantOf(Gui) then
-				Tween(b[1], { [b[2]] = T[b[3]] }, 0.3)
-			else
-				table.remove(binds, i)
-			end
+			if b[1]:IsDescendantOf(Gui) then Tween(b[1], { [b[2]] = T[b[3]] }, 0.3) else table.remove(binds, i) end
 		end
 		for _, fn in ipairs(themeFns) do pcall(fn) end
 	end
@@ -349,20 +341,13 @@ function Lumen:CreateWindow(cfg)
 		local frames, last = 0, os.clock()
 		conn(RunService.Heartbeat:Connect(function() frames = frames + 1 end))
 		task.spawn(function()
-			while Gui and Gui.Parent do
+			while Gui.Parent do
 				task.wait(1)
 				local now = os.clock()
-				local dt = math.max(now - last, 0.001)
-				Live.FPS = math.floor(frames / dt + 0.5)
+				Live.FPS = math.floor(frames / math.max(now - last, 0.001) + 0.5)
 				frames, last = 0, now
-				local ok, ping = pcall(function()
-					local stats = game:GetService("Stats")
-					local item = stats.Network and stats.Network.ServerStatsItem and stats.Network.ServerStatsItem["Data Ping"]
-					return item and item:GetValue()
-				end)
-				if ok and type(ping) == "number" then
-					Live.Ping = math.floor(ping + 0.5)
-				end
+				local ok, ping = pcall(function() return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() end)
+				if ok then Live.Ping = math.floor(ping + 0.5) end
 				for _, fn in ipairs(ticks) do pcall(fn) end
 			end
 		end)
@@ -370,7 +355,7 @@ function Lumen:CreateWindow(cfg)
 
 	-- main frame ----------------------------------------------------------------
 	local WIDTH = cfg.Size and cfg.Size.X or 660
-	local HEIGHT = cfg.Size and cfg.Size.Y or 380
+	local HEIGHT = cfg.Size and cfg.Size.Y or 400
 	local TOP = 58
 	local hidden, minimized, userScale = true, false, 1
 	local locked = false
@@ -418,8 +403,8 @@ function Lumen:CreateWindow(cfg)
 		if topIcon:IsA("TextLabel") then bind(topIcon, "TextColor3", "Text") end
 		titleX = 52
 	end
-	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, 10), UDim2.new(0.6, 0, 0, 24))
-	text(Topbar, string.upper(cfg.Subtitle or "Premium - Glass - Interface"), 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(titleX, 33), UDim2.new(0.6, 0, 0, 14))
+	text(Topbar, cfg.Name or "Lumen", 20, Enum.Font.GothamBold, "Text", UDim2.fromOffset(titleX, cfg.Subtitle and 10 or 17), UDim2.new(0.6, 0, 0, 24))
+	text(Topbar, string.upper(cfg.Subtitle or ""), 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(titleX, 33), UDim2.new(0.6, 0, 0, 14))
 	local line = New("Frame", { Position = UDim2.new(0, 16, 1, -1), Size = UDim2.new(1, -32, 0, 1), BackgroundColor3 = C.White, BackgroundTransparency = 0.88, BorderSizePixel = 0, Parent = Topbar })
 	bind(line, "BackgroundColor3", "Line")
 
@@ -463,9 +448,10 @@ function Lumen:CreateWindow(cfg)
 	end
 
 	-- body: sidebar + pages ------------------------------------------------------------
+	local FOOT = cfg.StatusBar == false and 0 or 32
 	local Body = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, TOP + 8), Size = UDim2.new(1, 0, 1, -(TOP + 8)), Parent = Main })
 	local SideWrap = New("Frame", {
-		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0, 150, 1, -14), BorderSizePixel = 0,
+		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0, 150, 1, -14 - FOOT), BorderSizePixel = 0,
 		ClipsDescendants = true, Parent = Body,
 	}, { Corner(18) })
 	bind(SideWrap, "BackgroundColor3", "Card")
@@ -488,7 +474,46 @@ function Lumen:CreateWindow(cfg)
 		text(chip, lp.DisplayName, 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(50, 9), UDim2.new(1, -56, 0, 16)).TextTruncate = Enum.TextTruncate.AtEnd
 		text(chip, "v" .. Lumen.Version, 10, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(50, 26), UDim2.new(1, -56, 0, 14))
 	end
-	local Pages = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(172, 0), Size = UDim2.new(1, -186, 1, -14), Parent = Body })
+	local Pages = New("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(172, 0), Size = UDim2.new(1, -186, 1, -14 - FOOT), Parent = Body })
+
+	-- status bar: fps, ping, players in the server, account age, game ------------------
+	local gameName = game.Name
+	task.spawn(function()
+		local ok, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end)
+		if ok and info and info.Name then gameName = info.Name end
+	end)
+	if FOOT > 0 then
+		local sb = New("Frame", {
+			Position = UDim2.new(0, 14, 1, -38), Size = UDim2.new(1, -28, 0, 26), BorderSizePixel = 0, Parent = Body,
+		}, { Corner(13) })
+		bind(sb, "BackgroundColor3", "Card")
+		bind(sb, "BackgroundTransparency", "PanT")
+		local sbs = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Parent = sb })
+		bind(sbs, "Color", "Line")
+		bind(sbs, "Transparency", "LineT")
+		local lbl = New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -28, 1, 0), Font = Enum.Font.GothamMedium,
+			TextSize = 11, RichText = true, TextTruncate = Enum.TextTruncate.AtEnd, TextXAlignment = Enum.TextXAlignment.Left, Text = "", Parent = sb,
+		})
+		bind(lbl, "TextColor3", "Sub")
+		local function tint(good, ok) return "#" .. (good and C.Green or (ok and C.Gold or C.Red)):ToHex() end
+		local function ageText()
+			local d = lp.AccountAge
+			if d >= 365 then return string.format("%dy %dm", math.floor(d / 365), math.floor((d % 365) / 30)) end
+			return d .. "d"
+		end
+		onTick(function()
+			local fps, ping = Live.FPS, Live.Ping
+			local sep = "  |  "
+			lbl.Text = table.concat({
+				string.format('<font color="%s">%d</font> FPS', tint(fps >= 50, fps >= 30), fps),
+				ping > 0 and string.format('<font color="%s">%d</font> ms', tint(ping < 100, ping < 200), ping) or "- ms",
+				string.format("%d/%d %s", #Players:GetPlayers(), Players.MaxPlayers, L("players")),
+				L("Account age") .. " " .. ageText(),
+				gameName,
+			}, sep)
+		end)
+	end
 
 	----------------------------------------------------------------------
 	-- Notifications
@@ -598,7 +623,10 @@ function Lumen:CreateWindow(cfg)
 				local p, s = ref.AbsolutePosition, ref.AbsoluteSize
 				onMove(math.clamp((pos.X - p.X) / math.max(s.X, 1), 0, 1), math.clamp((pos.Y - p.Y) / math.max(s.Y, 1), 0, 1))
 			end
-			local function lock(v) if container:IsA("ScrollingFrame") then container.ScrollingEnabled = v end end
+			local function lock(v)
+				local sc = container:IsA("ScrollingFrame") and container or container:FindFirstAncestorOfClass("ScrollingFrame")
+				if sc then sc.ScrollingEnabled = v end
+			end
 			conn(inputFrame.InputBegan:Connect(function(i)
 				if isPress(i) then active = true lock(false) upd(i) end
 			end))
@@ -610,11 +638,40 @@ function Lumen:CreateWindow(cfg)
 
 		-- section header / label / paragraph / divider ---------------------------
 		function host:CreateSection(title, neon)
-			local f = card(30, neon or C.Pink)
-			New("Frame", { Position = UDim2.fromOffset(10, 7), Size = UDim2.fromOffset(3, 16), BackgroundColor3 = typeof(neon) == "Color3" and neon or C.Pink, BorderSizePixel = 0, Parent = f }, { Corner(2) })
+			local f = card(30, neon or "accent")
+			local bar = New("Frame", { Position = UDim2.fromOffset(10, 7), Size = UDim2.fromOffset(3, 16), BackgroundColor3 = typeof(neon) == "Color3" and neon or T.Accent, BorderSizePixel = 0, Parent = f }, { Corner(2) })
+			if typeof(neon) ~= "Color3" then bind(bar, "BackgroundColor3", "Accent") end
 			text(f, string.upper(title or "Section"), 11, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(22, 0), UDim2.new(1, -30, 1, 0))
 			return base(f, {})
 		end
+		function host:CreateFolder(name, startOpen)
+			local f = card(36)
+			local open = startOpen == true
+			text(f, tostring(name), 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 0), UDim2.new(1, -44, 0, 36))
+			local arrow = text(f, "▾", 14, Enum.Font.GothamMedium, "Sub", UDim2.new(1, -26, 0, 0), UDim2.fromOffset(16, 36), Enum.TextXAlignment.Center)
+			local inner = New("Frame", { Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, Parent = f })
+			local layout = List(8)
+			layout.Parent = inner
+			Pad(8, 0, 8, 0).Parent = inner
+			local head = hit(f, 36)
+			hover(f, head)
+			local function apply(animate)
+				local h = open and (40 + layout.AbsoluteContentSize.Y + 10) or 36
+				if animate then Tween(f, { Size = UDim2.new(1, 0, 0, h) }, 0.25) else f.Size = UDim2.new(1, 0, 0, h) end
+				Tween(arrow, { Rotation = open and 180 or 0 }, animate and 0.25 or 0)
+			end
+			layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() if open then apply(false) end end)
+			head.MouseButton1Click:Connect(function() open = not open apply(true) end)
+			local fh = { Frame = f }
+			attachElements(fh, inner)
+			function fh:Open() open = true apply(true) end
+			function fh:Close() open = false apply(true) end
+			function fh:Toggle() open = not open apply(true) end
+			function fh:Destroy() f:Destroy() end
+			apply(false)
+			return fh
+		end
+
 		function host:CreateLabel(t)
 			local f = card(32)
 			local l = text(f, tostring(t), 12, Enum.Font.Gotham, "Sub")
@@ -640,9 +697,13 @@ function Lumen:CreateWindow(cfg)
 		end
 		function host:CreateInfoRow(icon, key, value, neon)
 			local f = card(40, neon or "accent")
-			text(f, icon or "•", 15, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(10, 0), UDim2.fromOffset(24, 40), Enum.TextXAlignment.Center)
-			text(f, key, 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(40, 0), UDim2.fromOffset(86, 40)).TextTruncate = Enum.TextTruncate.AtEnd
-			local v = text(f, tostring(value), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(132, 0), UDim2.new(1, -142, 1, 0))
+			local kx = 12
+			if icon then
+				text(f, icon, 15, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(10, 0), UDim2.fromOffset(24, 40), Enum.TextXAlignment.Center)
+				kx = 40
+			end
+			text(f, key, 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(kx, 0), UDim2.fromOffset(86, 40)).TextTruncate = Enum.TextTruncate.AtEnd
+			local v = text(f, tostring(value), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(kx + 92, 0), UDim2.new(1, -(kx + 102), 1, 0))
 			v.TextTruncate = Enum.TextTruncate.AtEnd
 			return base(f, { Set = function(_, nv) v.Text = tostring(nv) end })
 		end
@@ -710,13 +771,22 @@ function Lumen:CreateWindow(cfg)
 			local inc = c.Increment or 1
 			local f = card(56, c.Neon)
 			text(f, c.Name or "Slider", 13, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 6), UDim2.new(0.6, 0, 0, 20))
-			local val = text(f, "", 12, Enum.Font.GothamMedium, "Sub", UDim2.new(0.4, -12, 0, 6), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
+			local val = New("TextBox", {
+				BackgroundTransparency = 1, Position = UDim2.new(0.4, -12, 0, 6), Size = UDim2.new(0.6, 0, 0, 20), Font = Enum.Font.GothamMedium,
+				TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right, ClearTextOnFocus = true, Text = "", Parent = f,
+			})
+			bind(val, "TextColor3", "Sub")
 			local track = New("Frame", { Position = UDim2.new(0, 12, 1, -20), Size = UDim2.new(1, -24, 0, 7), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(track, "BackgroundColor3", "Off")
 			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BorderSizePixel = 0, Parent = track }, { Corner(4) })
 			bind(fill, "BackgroundColor3", "Accent")
 			New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(1, 0.5), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = fill }, { Corner(7) })
 			local o = { CurrentValue = c.CurrentValue or min }
+			val.Focused:Connect(function() val.Text = tostring(o.CurrentValue) end)
+			val.FocusLost:Connect(function()
+				local n = tonumber(val.Text)
+				if n then o:Set(n) else o:Set(o.CurrentValue, true) end
+			end)
 			function o:Set(v, silent)
 				v = math.clamp(round(v, inc), min, max)
 				o.CurrentValue = v
@@ -741,7 +811,8 @@ function Lumen:CreateWindow(cfg)
 			local val = text(f, "", 12, Enum.Font.GothamMedium, "Sub", UDim2.new(0.4, -12, 0, 5), UDim2.new(0.6, 0, 0, 20), Enum.TextXAlignment.Right)
 			local track = New("Frame", { Position = UDim2.new(0, 12, 1, -16), Size = UDim2.new(1, -24, 0, 7), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(track, "BackgroundColor3", "Off")
-			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = c.Color or C.Green, BorderSizePixel = 0, Parent = track }, { Corner(4) })
+			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = c.Color or T.Accent, BorderSizePixel = 0, Parent = track }, { Corner(4) })
+			if not c.Color then bind(fill, "BackgroundColor3", "Accent") end
 			local o = {}
 			function o:Set(v, label)
 				v = math.clamp(v, 0, 1)
@@ -793,7 +864,7 @@ function Lumen:CreateWindow(cfg)
 			end
 			local function style()
 				local v = value()
-				if multi then cur.Text = #v == 0 and L("None") or table.concat(v, ", ")
+				if multi then cur.Text = #v == 0 and L("None") or ((c.MaxPick and ("(" .. #v .. "/" .. c.MaxPick .. ") ") or "") .. table.concat(v, ", "))
 				else cur.Text = v ~= nil and tostring(v) or L("None") end
 				for op, b in pairs(buttons) do
 					Tween(b, { TextColor3 = sel[op] and T.Accent or T.Text }, 0.15)
@@ -843,6 +914,11 @@ function Lumen:CreateWindow(cfg)
 					b.MouseLeave:Connect(function() Tween(b, { BackgroundTransparency = 1 }, 0.1) end)
 					b.MouseButton1Click:Connect(function()
 						if multi then
+							if not sel[op] and c.MaxPick then
+								local n = 0
+								for _ in pairs(sel) do n = n + 1 end
+								if n >= c.MaxPick then return end
+							end
 							sel[op] = (not sel[op]) or nil
 						else
 							sel = { [op] = true }
@@ -868,6 +944,10 @@ function Lumen:CreateWindow(cfg)
 				search.Text = ""
 				build()
 				layout()
+			end
+			function o:Clear(silent)
+				sel = {}
+				commit(silent)
 			end
 			function o:Get() return value() end
 			function o:Close()
@@ -897,13 +977,23 @@ function Lumen:CreateWindow(cfg)
 				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.new(0.42, 0, 0, 26),
 				BackgroundTransparency = 0.2, BorderSizePixel = 0, Font = Enum.Font.Gotham, TextSize = 11, ClearTextOnFocus = false,
 				PlaceholderText = c.PlaceholderText or "Type here...", Text = tostring(c.CurrentValue or ""), Parent = f,
-			}, { Corner(6), Pad(8, 0, 8, 0) })
+			}, { Corner(6), Pad(8, 0, 24, 0) })
 			bind(box, "BackgroundColor3", "Panel")
 			bind(box, "TextColor3", "Text")
 			bind(box, "PlaceholderColor3", "Sub")
 			local s = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Transparency = 0.85, Parent = box })
 			bind(s, "Color", "Line")
 			box.Focused:Connect(function() Tween(s, { Color = T.Accent, Transparency = 0 }, 0.15) end)
+			local clr = New("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 20, 0.5, 0), Size = UDim2.fromOffset(18, 18), BackgroundTransparency = 1,
+				Text = "×", Font = Enum.Font.GothamMedium, TextSize = 14, AutoButtonColor = false, Visible = box.Text ~= "", Parent = box,
+			})
+			bind(clr, "TextColor3", "Sub")
+			box:GetPropertyChangedSignal("Text"):Connect(function() clr.Visible = box.Text ~= "" end)
+			clr.MouseButton1Click:Connect(function()
+				box.Text = ""
+				box:CaptureFocus()
+			end)
 			local o = { CurrentValue = box.Text }
 			box.FocusLost:Connect(function()
 				Tween(s, { Color = T.Line, Transparency = 0.85 }, 0.15)
@@ -1044,24 +1134,24 @@ function Lumen:CreateWindow(cfg)
 			c = c or {}
 			local f = card(268)
 			local banner = New("Frame", { Size = UDim2.new(1, 0, 0, 80), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = f }, { Corner(10) })
-			local bg = New("UIGradient", { Rotation = 20, Color = ColorSequence.new(C.Purple:Lerp(C.Black, 0.45), T.Accent:Lerp(C.Black, 0.45)), Parent = banner })
-			onTheme(function() bg.Color = ColorSequence.new(C.Purple:Lerp(C.Black, 0.45), T.Accent:Lerp(C.Black, 0.45)) end)
-			if c.Badge ~= false then
+			banner.BackgroundColor3 = T.Accent:Lerp(C.Black, 0.5)
+			onTheme(function() banner.BackgroundColor3 = T.Accent:Lerp(C.Black, 0.5) end)
+			if type(c.Badge) == "string" then
 				New("TextLabel", {
 					AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(110, 24), BackgroundColor3 = rgb(20, 20, 40),
-					BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = C.Gold, Text = type(c.Badge) == "string" and c.Badge or "PREMIUM", Parent = f,
-				}, { Corner(12), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.5, Color = C.Gold }) })
+					BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = T.Text, Text = c.Badge, Parent = f,
+				}, { Corner(12), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Color = T.Accent }) })
 			end
 			local avatar = New("ImageLabel", { Position = UDim2.fromOffset(12, 36), Size = UDim2.fromOffset(84, 84), BorderSizePixel = 0, Parent = f }, { Corner(42) })
 			bind(avatar, "BackgroundColor3", "Panel")
 			local ast = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 3, Color = C.White, Parent = avatar })
-			New("UIGradient", { Rotation = 45, Color = ColorSequence.new(C.Green, C.Purple), Parent = ast })
+			bind(ast, "Color", "Accent")
 			loadAvatar(avatar)
 			local dotf = New("Frame", { Position = UDim2.fromOffset(78, 100), Size = UDim2.fromOffset(16, 16), BackgroundColor3 = C.Green, BorderSizePixel = 0, ZIndex = 3, Parent = f }, { Corner(8) })
 			local dstroke = New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 2, Parent = dotf })
 			bind(dstroke, "Color", "Card")
 			text(f, lp.DisplayName, 16, Enum.Font.GothamBold, "Text", UDim2.fromOffset(106, 86), UDim2.new(1, -116, 0, 20)).TextTruncate = Enum.TextTruncate.AtEnd
-			text(f, "@" .. lp.Name, 11, Enum.Font.GothamMedium, C.Pink, UDim2.fromOffset(106, 106), UDim2.new(1, -116, 0, 14)).TextTruncate = Enum.TextTruncate.AtEnd
+			text(f, "@" .. lp.Name, 11, Enum.Font.GothamMedium, "Sub", UDim2.fromOffset(106, 106), UDim2.new(1, -116, 0, 14)).TextTruncate = Enum.TextTruncate.AtEnd
 			local idp = New("TextButton", {
 				AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 126), Size = UDim2.new(1, -24, 0, 22), BackgroundTransparency = 0.2,
 				Font = Enum.Font.GothamMedium, TextSize = 10, AutoButtonColor = false, Text = "ID  " .. lp.UserId, Parent = f,
@@ -1083,16 +1173,16 @@ function Lumen:CreateWindow(cfg)
 			for i, t in ipairs(chipData) do
 				local ch = New("TextLabel", {
 					LayoutOrder = i, Size = UDim2.new(1 / #chipData, -4, 1, 0), BackgroundTransparency = 0.3, Font = Enum.Font.GothamMedium, TextSize = 10, Text = t, Parent = chips,
-				}, { Corner(11), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.2, Color = C.Green, Transparency = 0.45 }) })
+				}, { Corner(11), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Color = C.White, Transparency = 0.8 }) })
 				bind(ch, "BackgroundColor3", "Panel")
 				bind(ch, "TextColor3", "Text")
 			end
 
 			local stats = New("Frame", { Position = UDim2.fromOffset(12, 188), Size = UDim2.new(1, -24, 0, 56), BackgroundTransparency = 1, Parent = f }, { List(8, true) })
 			local defs = c.Stats or {
-				{ Label = L("FRIENDS"), Color = C.Green, Value = "…" },
-				{ Label = "PING", Color = C.Pink, Value = "…" },
-				{ Label = "FPS", Color = C.Purple, Value = "…" },
+				{ Label = L("FRIENDS"), Color = T.Sub, Value = "…" },
+				{ Label = "PING", Color = T.Sub, Value = "…" },
+				{ Label = "FPS", Color = T.Sub, Value = "…" },
 			}
 			local vls = {}
 			for i, d in ipairs(defs) do
@@ -1100,7 +1190,7 @@ function Lumen:CreateWindow(cfg)
 					Corner(10), New("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1.4, Color = d.Color, Transparency = 0.3 }),
 				})
 				bind(b, "BackgroundColor3", "Panel")
-				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold, TextSize = 15, TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = d.Color, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
+				vls[i] = New("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 6), Size = UDim2.new(1, 0, 0, 26), Font = Enum.Font.GothamBold, TextSize = 15, TextTruncate = Enum.TextTruncate.AtEnd, TextColor3 = T.Text, Text = type(d.Value) == "function" and "…" or tostring(d.Value), Parent = b })
 				text(b, d.Label, 9, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(0, 34), UDim2.new(1, 0, 0, 14), Enum.TextXAlignment.Center)
 			end
 			if c.Stats then
@@ -1144,18 +1234,73 @@ function Lumen:CreateWindow(cfg)
 			return base(f, {})
 		end
 
+		function host:CreateFpsGraph()
+			local f = card(96, "accent")
+			text(f, L("Performance"), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 6), UDim2.new(0.5, 0, 0, 18))
+			local cur = text(f, "", 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.5, 0, 0, 6), UDim2.new(0.5, -12, 0, 18), Enum.TextXAlignment.Right)
+			local N = 40
+			local area = New("Frame", { Position = UDim2.fromOffset(12, 30), Size = UDim2.new(1, -24, 0, 56), BackgroundTransparency = 1, Parent = f })
+			local bars, hist = {}, {}
+			for i = 1, N do
+				hist[i] = 0
+				bars[i] = New("Frame", {
+					AnchorPoint = Vector2.new(0, 1), Position = UDim2.new((i - 1) / N, 0, 1, 0), Size = UDim2.new(1 / N, -2, 0.03, 0), BorderSizePixel = 0, Parent = area,
+				}, { Corner(2) })
+			end
+			local function col(v) return v >= 50 and C.Green or (v >= 30 and C.Gold or C.Red) end
+			onTick(function()
+				table.remove(hist, 1)
+				hist[#hist + 1] = Live.FPS
+				for i = 1, N do
+					local v = hist[i]
+					bars[i].BackgroundColor3 = col(v)
+					bars[i].Size = UDim2.new(1 / N, -2, math.clamp(v / 120, 0.03, 1), 0)
+				end
+				cur.Text = Live.FPS .. " FPS  /  " .. (Live.Ping > 0 and (Live.Ping .. " ms") or "- ms")
+			end)
+			return base(f, {})
+		end
+
+		function host:CreateServerCard()
+			host:CreateSection(L("Server"))
+			local players = host:CreateInfoRow(nil, L("Players"), "-")
+			local uptime = host:CreateInfoRow(nil, L("Server time"), "-")
+			host:CreateInfoRow(nil, "Place ID", tostring(game.PlaceId))
+			local job = game.JobId
+			host:CreateInfoRow(nil, "Job ID", job ~= "" and (job:sub(1, 8) .. "...") or "-")
+			onTick(function()
+				players:Set(#Players:GetPlayers() .. " / " .. Players.MaxPlayers)
+				uptime:Set(fmtDuration(workspace.DistributedGameTime))
+			end)
+			host:CreateButton({ Name = L("Copy Job ID"), Callback = function()
+				if type(setclipboard) == "function" and job ~= "" then
+					pcall(setclipboard, job)
+					W:Notify({ Title = L("Copied"), Content = job, Type = "Success", Duration = 2 })
+				end
+			end })
+			host:CreateButton({ Name = L("Rejoin"), Callback = function()
+				W:Dialog({ Title = L("Rejoin"), Content = L("Are you sure?"), Buttons = {
+					{ Name = L("Rejoin"), Primary = true, Callback = function()
+						local TS = game:GetService("TeleportService")
+						pcall(function()
+							if job ~= "" then TS:TeleportToPlaceInstance(game.PlaceId, job, lp) else TS:Teleport(game.PlaceId, lp) end
+						end)
+					end },
+					{ Name = L("Cancel") },
+				} })
+			end })
+		end
+
 		function host:CreateAnniversaryCard()
-			local f = card(70, C.Green)
-			text(f, "🎂 " .. L("Account anniversary"), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.55, 0, 0, 18))
-			-- Correct days-left: (365 - mod) % 365 so exact anniversary day shows 0
-			local mod = ageDays % 365
-			local left = (365 - mod) % 365
-			local nextYear = math.floor(ageDays / 365) + 1
-			text(f, L("%d days left (year %d)", left, nextYear), 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.45, 0, 0, 8), UDim2.new(0.55, -12, 0, 18), Enum.TextXAlignment.Right)
+			local f = card(70)
+			text(f, L("Account anniversary"), 12, Enum.Font.GothamMedium, "Text", UDim2.fromOffset(12, 8), UDim2.new(0.55, 0, 0, 18))
+			local left = 365 - (ageDays % 365)
+			text(f, L("%d days left (year %d)", left, math.floor(ageDays / 365) + 1), 11, Enum.Font.GothamMedium, "Sub", UDim2.new(0.45, 0, 0, 8), UDim2.new(0.55, -12, 0, 18), Enum.TextXAlignment.Right)
 			local bar = New("Frame", { Position = UDim2.fromOffset(12, 44), Size = UDim2.new(1, -24, 0, 8), BorderSizePixel = 0, Parent = f }, { Corner(4) })
 			bind(bar, "BackgroundColor3", "Off")
-			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.Green, BorderSizePixel = 0, Parent = bar }, { Corner(4) })
-			Tween(fill, { Size = UDim2.fromScale(mod / 365, 1) }, 0.8)
+			local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BorderSizePixel = 0, Parent = bar }, { Corner(4) })
+			bind(fill, "BackgroundColor3", "Accent")
+			Tween(fill, { Size = UDim2.fromScale((ageDays % 365) / 365, 1) }, 0.8)
 			return base(f, {})
 		end
 
@@ -1180,13 +1325,13 @@ function Lumen:CreateWindow(cfg)
 				end
 			end)
 			onTick(function()
-				live.Text = "● " .. L("%d/%d players - up %s", #Players:GetPlayers(), Players.MaxPlayers, fmtDuration(time()))
+				live.Text = "● " .. L("%d/%d players - up %s", #Players:GetPlayers(), Players.MaxPlayers, fmtDuration(workspace.DistributedGameTime))
 			end)
 			return base(f, {})
 		end
 
 		function host:CreateAccountDetails()
-			host:CreateSection(L("Account details"), C.Pink)
+			host:CreateSection(L("Account details"))
 			local device = "PC"
 			if UIS.TouchEnabled and not UIS.KeyboardEnabled then device = "Phone / Tablet"
 			elseif UIS.GamepadEnabled and not UIS.KeyboardEnabled then device = "Console" end
@@ -1202,27 +1347,26 @@ function Lumen:CreateWindow(cfg)
 				end
 			end)
 			local y, m, d = math.floor(ageDays / 365), math.floor((ageDays % 365) / 30), ageDays % 30
-			host:CreateInfoRow("📅", L("Created"), fmtDate(createdAt))
-			host:CreateInfoRow("⌛", L("Account age"), L("%dy %dm %dd (%d days)", y, m, d, ageDays))
-			host:CreateInfoRow("🌐", L("Locale"), locale)
-			host:CreateInfoRow("👥", L("Team"), lp.Team and lp.Team.Name or "-")
-			host:CreateInfoRow("💻", L("Device"), device)
-			host:CreateInfoRow("🔧", L("Executor"), exec)
+			host:CreateInfoRow(nil, L("Created"), fmtDate(createdAt))
+			host:CreateInfoRow(nil, L("Account age"), L("%dy %dm %dd (%d days)", y, m, d, ageDays))
+			host:CreateInfoRow(nil, L("Locale"), locale)
+			host:CreateInfoRow(nil, L("Team"), lp.Team and lp.Team.Name or "-")
+			host:CreateInfoRow(nil, L("Device"), device)
+			host:CreateInfoRow(nil, L("Executor"), exec)
 		end
 
 		----------------------------------------------------------------
 		-- Built-in panels
 		----------------------------------------------------------------
 		function host:CreateUISettings()
-			host:CreateSection(L("Appearance"), C.Purple)
+			host:CreateSection(L("Appearance"))
 			local themes, accents = {}, {}
 			for n in pairs(Lumen.Themes) do themes[#themes + 1] = n end
 			for n in pairs(Lumen.Accents) do accents[#accents + 1] = n end
 			table.sort(themes)
 			table.sort(accents)
 			host:CreateDropdown({ Name = L("Theme"), Options = themes, CurrentOption = themeName, Flag = "Lumen_Theme", Callback = function(v) if v then W:SetTheme(v) end end })
-			local accentName = type(cfg.Accent) == "string" and cfg.Accent or nil
-			host:CreateDropdown({ Name = L("Accent"), Options = accents, CurrentOption = accentName, Flag = "Lumen_Accent", Callback = function(v) if v then W:SetAccent(v) end end })
+			host:CreateDropdown({ Name = L("Accent"), Options = accents, Flag = "Lumen_Accent", Callback = function(v) if v then W:SetAccent(v) end end })
 			host:CreateSlider({ Name = L("UI scale"), Range = { 60, 120 }, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "Lumen_Scale", Callback = function(v) W:SetUIScale(v / 100) end })
 			host:CreateSlider({ Name = L("Transparency"), Range = { 0, 60 }, Increment = 1, Suffix = "%", CurrentValue = math.floor(T.WinT * 100 + 0.5), Flag = "Lumen_Transparency", Callback = function(v) W:SetTransparency(v / 100) end })
 			host:CreateKeybind({ Name = L("Toggle key"), CurrentKeybind = toggleKey.Name, Flag = "Lumen_ToggleKey", ChangedCallback = function(k) if k then W:SetToggleKey(k) end end })
@@ -1234,8 +1378,57 @@ function Lumen:CreateWindow(cfg)
 			end })
 		end
 
+		function host:CreateUtilities()
+			host:CreateSection(L("Utilities"))
+			local afk
+			host:CreateToggle({ Name = L("Anti-AFK"), Description = L("Stops the idle kick"), Flag = "Lumen_AntiAFK", Callback = function(on)
+				if afk then afk:Disconnect() afk = nil end
+				if on then
+					afk = conn(lp.Idled:Connect(function()
+						pcall(function()
+							local vu = game:GetService("VirtualUser")
+							vu:CaptureController()
+							vu:ClickButton2(Vector2.new())
+						end)
+					end))
+				end
+			end })
+			if type(setfpscap) == "function" then
+				host:CreateSlider({ Name = L("FPS cap"), Range = { 30, 240 }, Increment = 10, CurrentValue = 60, Flag = "Lumen_FPSCap", Callback = function(v)
+					pcall(setfpscap, v)
+				end })
+			end
+			host:CreateButton({ Name = L("Server hop"), Description = L("Joins a different public server"), Callback = function()
+				task.spawn(function()
+					local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+					local ok, data = pcall(function() return HttpService:JSONDecode(game:HttpGet(url)) end)
+					if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
+						W:Notify({ Title = L("Server hop"), Content = L("Could not load servers"), Type = "Error" })
+						return
+					end
+					local choices = {}
+					for _, sv in ipairs(data.data) do
+						if sv.id ~= game.JobId and sv.playing and sv.maxPlayers and sv.playing < sv.maxPlayers then choices[#choices + 1] = sv end
+					end
+					if #choices == 0 then
+						W:Notify({ Title = L("Server hop"), Content = L("No other servers found"), Type = "Warning" })
+						return
+					end
+					local pick = choices[math.random(#choices)]
+					W:Notify({ Title = L("Server hop"), Content = pick.playing .. "/" .. pick.maxPlayers .. " " .. L("players"), Duration = 2 })
+					pcall(function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, pick.id, lp) end)
+				end)
+			end })
+			host:CreateButton({ Name = L("Copy join script"), Callback = function()
+				if type(setclipboard) ~= "function" then return end
+				local code = string.format('game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s", game.Players.LocalPlayer)', game.PlaceId, game.JobId)
+				pcall(setclipboard, code)
+				W:Notify({ Title = L("Copied"), Content = L("Copy join script"), Type = "Success", Duration = 2 })
+			end })
+		end
+
 		function host:CreateConfigManager()
-			host:CreateSection(L("Configs"), C.Purple)
+			host:CreateSection(L("Configs"))
 			local nameInput = host:CreateInput({ Name = L("Config name"), PlaceholderText = "default", CurrentValue = "default" })
 			local dd
 			dd = host:CreateDropdown({
@@ -1290,9 +1483,9 @@ function Lumen:CreateWindow(cfg)
 			Text = "", AutoButtonColor = false, Parent = Sidebar,
 		}, { Corner(10) })
 		local bar = New("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 4, 0.5, 0), Size = UDim2.fromOffset(3, 0), BackgroundColor3 = C.White, BorderSizePixel = 0, Parent = btn }, { Corner(2) })
-		local ic = makeIcon(btn, icon or "•", 24, 40, UDim2.fromOffset(12, 0))
+		local ic = makeIcon(btn, icon or "", 24, 40, UDim2.fromOffset(12, 0))
 		local tx = New("TextLabel", {
-			BackgroundTransparency = 1, Position = UDim2.fromOffset(42, 0), Size = UDim2.new(1, -48, 1, 0), Font = Enum.Font.GothamMedium,
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(icon and 42 or 16, 0), Size = UDim2.new(1, icon and -48 or -22, 1, 0), Font = Enum.Font.GothamMedium,
 			TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Text = name, Parent = btn,
 		})
 
@@ -1358,12 +1551,14 @@ function Lumen:CreateWindow(cfg)
 	end
 
 	function W:CreateHomeTab(name, icon)
-		local tab = W:CreateTab(name or "Home", icon or "🏠")
+		local tab = W:CreateTab(name or "Home", icon)
 		local left, right = tab:Split(0.46)
 		left:CreateProfileCard()
-		left:CreateClockCard()
+		left:CreateFpsGraph()
 		left:CreateAnniversaryCard()
 		right:CreateGameCard()
+		right:CreateClockCard()
+		right:CreateServerCard()
 		right:CreateAccountDetails()
 		return tab, left, right
 	end
@@ -1420,10 +1615,9 @@ function Lumen:CreateWindow(cfg)
 	end
 	function W:Destroy()
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-		conns, ticks, themeFns, binds = {}, {}, {}, {}
 		Lumen.Listening = false
-		if blur then pcall(function() blur:Destroy() end) end
-		if Gui then pcall(function() Gui:Destroy() end) end
+		if blur then blur:Destroy() end
+		Gui:Destroy()
 		for i, w in ipairs(Lumen.Windows) do
 			if w == W then table.remove(Lumen.Windows, i) break end
 		end
@@ -1444,7 +1638,7 @@ function Lumen:CreateWindow(cfg)
 		})
 		bind(t, "TextColor3", "Text")
 		onTick(function()
-			t.Text = (label or cfg.Name or "Lumen") .. "  |  " .. Live.FPS .. " fps  |  " .. Live.Ping .. " ms"
+			t.Text = (label or cfg.Name or "Lumen") .. "  |  " .. Live.FPS .. " fps  |  " .. Live.Ping .. " ms  |  " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers
 		end)
 		local dragging, sm, sp
 		f.InputBegan:Connect(function(i)
@@ -1746,6 +1940,7 @@ function Lumen:CreateWindow(cfg)
 	if cfg.KeySystem then runKeyGate(cfg.KeySystem) end
 
 	Lumen.Windows[#Lumen.Windows + 1] = W
+	if cfg.Watermark then W:CreateWatermark(type(cfg.Watermark) == "string" and cfg.Watermark or nil) end
 	task.defer(function() W:SetVisible(true) end)
 	return W
 end
