@@ -160,6 +160,34 @@ local function cfgPath(name)
 	return "Lumen/" .. (tostring(name):gsub("[^%w_%- ]", "_")) .. ".json"
 end
 
+-- Loads an image from a web link (github blob links are converted to raw links).
+-- Calls cb(assetUrl) when ready. Needs writefile + getcustomasset + HttpGet.
+local function webImage(url, cb)
+	url = tostring(url):gsub("^https?://github%.com/([^/]+)/([^/]+)/blob/", "https://raw.githubusercontent.com/%1/%2/")
+	task.spawn(function()
+		local getAsset = getcustomasset or getsynasset
+		if type(getAsset) ~= "function" or not fsOK() then
+			warn("[Lumen] This executor cannot load web images; use an asset id instead")
+			return
+		end
+		local hsh = 5381
+		for i = 1, #url do
+			hsh = (hsh * 33 + string.byte(url, i)) % 4294967296
+		end
+		local path = "Lumen/img_" .. hsh .. ".png"
+		local ok, err = pcall(function()
+			if not isfile(path) then
+				ensureFolder()
+				writefile(path, game:HttpGet(url))
+			end
+			cb(getAsset(path))
+		end)
+		if not ok then
+			warn("[Lumen] Image failed: " .. tostring(err))
+		end
+	end)
+end
+
 -- Icon registry: name -> rbxassetid number (fill these in, or pass ids directly).
 -- Entries left at 0 fall back to a letter glyph.
 Lumen.Icons = {
@@ -567,17 +595,23 @@ function Lumen:CreateWindow(cfg)
 		if type(ic) == "string" and tonumber(ic) and not ic:find("^rbx") then
 			ic = tonumber(ic)
 		end
-		local isImg = type(ic) == "number" or (type(ic) == "string" and (ic:find("^rbxasset") ~= nil or ic:find("^rbxthumb") ~= nil))
+		local isWeb = type(ic) == "string" and ic:find("^https?://") ~= nil
+		local isImg = isWeb or type(ic) == "number" or (type(ic) == "string" and (ic:find("^rbxasset") ~= nil or ic:find("^rbxthumb") ~= nil))
 		if isImg then
 			local img = New("ImageLabel", {
 				BackgroundTransparency = 1,
 				Size = UDim2.fromOffset(18, 18),
 				Position = UDim2.new(pos.X.Scale, pos.X.Offset + (w - 18) / 2, pos.Y.Scale, pos.Y.Offset + (h - 18) / 2),
-				Image = type(ic) == "number" and ("rbxassetid://" .. ic) or ic,
+				Image = isWeb and "" or (type(ic) == "number" and ("rbxassetid://" .. ic) or ic),
 				ScaleType = Enum.ScaleType.Fit,
 				Parent = par,
 			})
 			bind(img, "ImageColor3", colorKey)
+			if isWeb then
+				webImage(ic, function(a)
+					img.Image = a
+				end)
+			end
 			return img
 		end
 		local lbl = New("TextLabel", {
@@ -2221,27 +2255,8 @@ function Lumen:CreateWindow(cfg)
 				if type(src) == "number" then
 					img.Image = "rbxassetid://" .. src
 				elseif type(src) == "string" and src:find("^https?://") then
-					task.spawn(function()
-						local getAsset = getcustomasset or getsynasset
-						if type(getAsset) ~= "function" or not fsOK() then
-							warn("[Lumen] Executor cannot load web images; use an asset id instead")
-							return
-						end
-						local hsh = 5381
-						for i = 1, #src do
-							hsh = (hsh * 33 + string.byte(src, i)) % 4294967296
-						end
-						local path = "Lumen/img_" .. hsh .. ".png"
-						local ok, err = pcall(function()
-							if not isfile(path) then
-								ensureFolder()
-								writefile(path, game:HttpGet(src))
-							end
-							img.Image = getAsset(path)
-						end)
-						if not ok then
-							warn("[Lumen] Image failed: " .. tostring(err))
-						end
+					webImage(src, function(a)
+						img.Image = a
 					end)
 				elseif type(src) == "string" then
 					img.Image = src
@@ -2809,22 +2824,90 @@ function Lumen:CreateWindow(cfg)
 
 	-- floating reopen button (useful on mobile)
 	do
+		local src = cfg.ButtonImage or cfg.Icon
 		local fb = New("TextButton", {
-			Position = UDim2.new(0, 12, 0.5, -20),
-			Size = UDim2.fromOffset(40, 40),
-			Text = cfg.Icon and "" or string.sub(cfg.Name or "L", 1, 1),
+			Position = UDim2.new(0, 12, 0.5, -24),
+			Size = UDim2.fromOffset(48, 48),
+			Text = string.sub(cfg.Name or "L", 1, 1),
 			Font = Enum.Font.GothamBold,
-			TextSize = 16,
+			TextSize = 18,
 			AutoButtonColor = false,
-			BackgroundTransparency = 0.25,
+			BackgroundTransparency = 0.2,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			ZIndex = 200,
 			Parent = Gui,
-		}, { Corner(20) })
+		}, { Corner(24) })
 		bind(fb, "BackgroundColor3", "Panel")
 		bind(fb, "TextColor3", "Accent")
-		fb.MouseButton1Click:Connect(function()
-			W:Toggle()
+
+		local fs = New("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Thickness = 2,
+			Parent = fb,
+		})
+		bind(fs, "Color", "Accent")
+
+		if src then
+			local fi = New("ImageLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromScale(1, 1),
+				ScaleType = Enum.ScaleType.Crop,
+				ZIndex = 201,
+				Parent = fb,
+			}, { Corner(24) })
+			local url = tostring(src)
+			if type(src) == "number" or tonumber(url) then
+				fi.Image = "rbxassetid://" .. tostring(src)
+			elseif url:find("^https?://") then
+				webImage(url, function(a)
+					fi.Image = a
+					fb.Text = ""
+				end)
+			elseif Lumen.Icons[url:lower()] and Lumen.Icons[url:lower()] ~= 0 then
+				fi.Image = "rbxassetid://" .. tostring(Lumen.Icons[url:lower()])
+			else
+				fi.Image = url
+			end
+			if not url:find("^https?://") then
+				fb.Text = ""
+			end
+		end
+
+		-- tap to toggle, drag to move
+		local down, moved, sm, sp = false, false, nil, nil
+		fb.InputBegan:Connect(function(i)
+			if isPress(i) then
+				down, moved, sm, sp = true, false, i.Position, fb.Position
+			end
 		end)
+		conn(UIS.InputChanged:Connect(function(i)
+			if down and isMove(i) then
+				local d = i.Position - sm
+				if d.Magnitude > 8 then
+					moved = true
+				end
+				if moved then
+					local cam = workspace.CurrentCamera
+					local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+					fb.Position = UDim2.new(
+						0,
+						math.clamp(sp.X.Offset + d.X, 0, vp.X - 48),
+						sp.Y.Scale,
+						math.clamp(sp.Y.Offset + d.Y, -vp.Y * sp.Y.Scale, vp.Y * (1 - sp.Y.Scale) - 48)
+					)
+				end
+			end
+		end))
+		conn(UIS.InputEnded:Connect(function(i)
+			if down and isPress(i) then
+				down = false
+				if not moved then
+					playSound("click")
+					W:Toggle()
+				end
+			end
+		end))
 	end
 
 	Lumen.Windows[#Lumen.Windows + 1] = W
