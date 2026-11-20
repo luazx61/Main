@@ -15,10 +15,9 @@ A glass-style, blue-accent UI library for Roblox executors, built for mobile and
 
 ## Install
 ```lua
-local BASE = "https://raw.githubusercontent.com/YOUR_USERNAME/lumen-ui/main/"
+local BASE = "https://raw.githubusercontent.com/luazx61/lumen-ui/main/"
 local Lumen = loadstring(game:HttpGet(BASE .. "Lumen.lua"))()
 ```
-Replace `YOUR_USERNAME` with your GitHub name.
 
 ## Quick start
 ```lua
